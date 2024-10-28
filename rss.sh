@@ -1,22 +1,16 @@
 #!/bin/bash
 
-# 进入 rss 目录
-cd ~/rss || exit
-
-# 创建虚拟环境
-python3 -m venv rss_venv
-
-# 激活虚拟环境
-source rss_venv/bin/activate
-
-# 安装 requirements.txt 中的库
-pip install -r ~/rss/requirements.txt
-
-# 设置定时任务
-# 检查是否已存在相应的 crontab 任务
-(crontab -l | grep -q '~/rss/os.sh') || (crontab -l; echo "*/10 * * * * ~/rss/os.sh") | crontab -
-
-echo "设置完成！"
-
-# 打开 .env 文件以便输入
-nano ~/rss/.env
+# 检查 rss.py 是否在运行
+if pgrep -f "rss.py" > /dev/null; then
+    echo "rss.py is running. Stopping it..."
+    # 停止 rss.py 进程
+    pkill -f "rss.py"
+else
+    echo "rss.py is not running."
+fi
+# 等待1秒
+sleep 1
+# 运行 RSS 脚本
+source ~/rss/rss_venv/bin/activate
+python3 ~/rss/rss.py &
+deactivate
