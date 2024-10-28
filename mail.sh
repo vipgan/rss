@@ -11,6 +11,6 @@ fi
 # 等待2秒
 sleep 1
 # 运行 MAIL 脚本
-source ~/mail/mail_venv/bin/activate
-python3 ~/mail/mail.py &
+source ~/rss/rss_venv/bin/activate
+python3 ~/rss/mail.py &
 deactivate
