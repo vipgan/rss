@@ -220,10 +220,9 @@ def fetch_emails():
                 url = f"https://mail.qq.com/{sender}"
 
                 message = f'''
-✉️*{name}* <{email_address}>
+✉️ *{name}* <{email_address}>
 {subject}
-* {email_date_bj.strftime('%Y-%m-%d %H:%M:%S')} *
-*re*:
+
 {body}
 '''
                 send_message(message)

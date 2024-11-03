@@ -4,56 +4,34 @@ import aiomysql
 import logging
 import datetime
 from feedparser import parse
-from telegram import Bot
 import re
 import os
 from dotenv import load_dotenv
+from telegram import Bot
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.tmt.v20180321 import tmt_client, models
+import queue
 
-# 加载 .env 文件
+# 加载.env 文件
 load_dotenv()
 
 # RSS 源列表
 RSS_FEEDS = [
- #   'https://rsshub.app/bilibili/hot-search',  # bilibili
- #   'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5c91d2e23882afa09dff4901',  # 36氪 - 24小时热榜
- #   'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5cac99a7f5648c90ed310e18',  # 微博热搜
- #   'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5cf92d7f0cc93bc69d082608',  # 百度热搜榜
-    'https://rsshub.app/guancha/headline',  # 观察网
- #   'https://rsshub.app/zaobao/znews/china',  # 联合早报
-    'https://blog.090227.xyz/atom.xml',  # CM
-    'https://www.freedidi.com/feed', # 零度解说
-    'https://36kr.com/feed',  # 36氪
-    'https://www.zhihu.com/rss', #  知呼
-    'https://www.huxiu.com/rss/0.xml',  #  虎嗅网
-    'https://plink.anyfeeder.com/zaobao/realtime/china', # 联合早报
-    'https://www.ithome.com/rss/', # IT之家
+    ('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC World News'),  
+    ('http://rss.cnn.com/rss/cnn_topstories.rss', 'CNN Top Stories'),  
+    ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'US Top News and Analysis'),  
+    ('https://www.federalreserve.gov/feeds/h10.xml', 'Foreign Exchange Rates'),  
+    ('http://www.nhk.or.jp/lesson/common/rss/lesson/chinese.xml', 'nhk'),  
+    ('https://feeds.bbci.co.uk/news/rss.xml', 'BBC 新闻'),  
+    ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),  
+    ('https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml', '纽约时报'),  
+    ('http://rss.cnn.com/rss/edition.rss', 'CNN'),  
 ]
 
 SECOND_RSS_FEEDS = [
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', # 苏恒观察
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩Ke En
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCXkOTZJ743JgVhJWmNV8F3Q', # 寒國人
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC2r2LPbOUssIa02EbOIm7NA', # 星球熱點
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC000Jn3HGeQSwBuX_cLDK8Q', # 我是柳傑克
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCG_gH6S-2ZUOtEw27uIS_QA', # 7Car小七車觀點
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCF-Q1Zwyn9681F7du8DMAWg', # 謝宗桓-老謝來了
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCOSmkVK2xsihzKXQgiXPS4w', # 历史哥
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSYBgX9pWGiUAcBxjnj6JCQ', # 郭正亮頻道
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCNiJNzSkfumLB7bYtXcIEmg', # 真的很博通
-
-# 影视
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC7Xeh7thVIgs_qfTlwC-dag', # Marc TV
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCqWNOHjgfL8ADEdXGznzwUw', # 悦耳音乐酱
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCCD14H7fJQl3UZNWhYMG3Mg', # 温城鲤
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQO2T82PiHCYbqmCQ6QO6lw', # 月亮說
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCKyDmY3R_xGKz8IjvbijiHA', # 珊珊追剧社
+    # ('https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', '苏恒观察'), 
 ]
 
 # Telegram 配置
@@ -71,25 +49,45 @@ DB_CONFIG = {
     'maxsize': 10
 }
 
+# 腾讯云翻译配置
+TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
+TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
+
+# 消息队列，用于存储待翻译和推送的消息
+message_queue = queue.Queue()
+
+
 async def fetch_feed(session, feed):
     try:
-        async with session.get(feed, timeout=88) as response:
+        async with session.get(feed[0], timeout=55) as response:
             response.raise_for_status()
             content = await response.read()
             return parse(content)
     except Exception as e:
-        logging.error(f"Error fetching {feed}: {e}")
+        logging.error(f"Error fetching {feed[0]}: {e}")
         return None
 
-async def send_message(bot, chat_id, text, chunk_size=4000):
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i + chunk_size]
-        try:
-            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode='Markdown')
-        except Exception as e:
-            logging.error(f"Markdown send failed: {e}")
-            # 改用纯文本发送
-            await bot.send_message(chat_id=chat_id, text=chunk)
+
+async def send_message(bot, chat_id, text, format_type='Markdown', chunk_size=4000, disable_preview=False):
+    try:
+        if format_type == 'Markdown':
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i:i + chunk_size]
+                try:
+                    kwargs = {'chat_id': chat_id, 'text': chunk, 'parse_mode': 'Markdown'}
+                    if disable_preview:
+                        kwargs['disable_web_page_preview'] = True
+                    await bot.send_message(**kwargs)
+                except Exception as e:
+                    logging.error(f"Markdown format sending failed for chunk: {e}")
+                    await bot.send_message(chat_id=chat_id, text=chunk)
+        else:
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i:i + chunk_size]
+                await bot.send_message(chat_id=chat_id, text=chunk)
+    except Exception as e:
+        logging.error(f"Failed to send message: {e}")
+
 
 async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
     feed_data = await fetch_feed(session, feed)
@@ -97,21 +95,35 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
         return []
 
     new_entries = []
-    messages = []  # 用于存储新条目的消息
+    messages = []
 
     for entry in feed_data.entries:
         subject = entry.title if entry.title else None
         url = entry.link if entry.link else None
-
-        # 使用正则表达式去除主题中的特殊符号
-        if subject:
-            subject = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '', subject)  # 保留中英文及数字
+        summary = entry.summary if hasattr(entry, 'summary') else "暂无简介"
 
         message_id = f"{subject}_{url}" if subject and url else None
 
         if (url, subject, message_id) not in sent_entries:
-            message = f"*{subject}*\n{url}"  # 使用清理后的标题
-            messages.append(message)
+            original_message_parts = []
+            if subject:
+                translated_subject = await auto_translate_text(subject)
+                original_message_parts.append(f"*{translated_subject}*")
+            else:
+                original_message_parts.append("*无标题*")
+
+            if summary:
+                translated_summary = await auto_translate_text(summary)
+                original_message_parts.append(translated_summary)
+            else:
+                original_message_parts.append("无简介")
+
+            if url:
+                source_link = f"[{feed[1]}]({url})"
+                original_message_parts.append(source_link)
+
+            combined_message = "\n\n".join(original_message_parts)
+            messages.append(combined_message)
             new_entries.append((url, subject, message_id))
 
             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -124,14 +136,11 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
             )
             sent_entries.add((url, subject, message_id))
 
-    # 合并为一个消息进行推送
     if messages:
         combined_message = "\n\n".join(messages)
-        for chat_id in allowed_chat_ids:
-            await send_message(bot, chat_id, combined_message)
-        await asyncio.sleep(6)  # 避免触发 Telegram API 速率限制
-
+        message_queue.put((combined_message, bot, allowed_chat_ids))
     return new_entries
+
 
 async def connect_to_db_pool():
     try:
@@ -139,6 +148,7 @@ async def connect_to_db_pool():
     except Exception as e:
         logging.error(f"Database connection error: {e}")
         return None
+
 
 async def load_sent_entries_from_db(pool, table_name):
     try:
@@ -151,6 +161,7 @@ async def load_sent_entries_from_db(pool, table_name):
         logging.error(f"Error loading sent entries: {e}")
         return set()
 
+
 async def save_sent_entry_to_db(pool, url, subject, message_id, table_name):
     try:
         async with pool.acquire() as conn:
@@ -162,6 +173,66 @@ async def save_sent_entry_to_db(pool, url, subject, message_id, table_name):
                 await conn.commit()
     except Exception as e:
         logging.error(f"Error saving entry: {e}")
+
+
+async def translate_and_send():
+    while True:
+        try:
+            message_data = message_queue.get()
+            if message_data is None:
+                break
+            original_message, bot, allowed_chat_ids = message_data
+            parts = original_message.split('\n\n')
+            translated_message_parts = []
+            for part in parts:
+                if part.startswith("*"):
+                    subject = part.replace('*', '').strip()
+                    translated_subject = await auto_translate_text(subject)
+                    translated_message_parts.append(f"*{translated_subject}*")
+                else:
+                    if not part.startswith("["):
+                        translated_part = await auto_translate_text(part)
+                        translated_message_parts.append(translated_part)
+                    else:
+                        translated_message_parts.append(part)
+            translated_message = "\n\n".join(translated_message_parts)
+            for chat_id in allowed_chat_ids:
+                await send_message(bot, chat_id, translated_message, 'Markdown')
+            await asyncio.sleep(6)  
+        except Exception as e:
+            logging.error(f"Error in translation and sending: {e}")
+
+
+async def auto_translate_text(text):
+    try:
+        cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
+        httpProfile = HttpProfile()
+        httpProfile.endpoint = "tmt.tencentcloudapi.com"
+
+        clientProfile = ClientProfile()
+        clientProfile.httpProfile = httpProfile
+        client = tmt_client.TmtClient(cred, "ap-guangzhou", clientProfile)
+
+        req = models.TextTranslateRequest()
+        req.SourceText = text
+        req.Source = "auto"
+        req.Target = "zh"
+        req.ProjectId = 0
+
+        print(f"Sending translation request for text: {text}")
+        resp = client.TextTranslate(req)
+        return resp.TargetText
+    except Exception as e:
+        logging.error(f"Translation error for text '{text}': {e}")
+        # 可以选择记录错误日志、重试翻译或采取其他适当的措施
+        return text
+
+
+def sanitize_markdown(text):
+    # 移除可能的 HTML 标签
+    cleaned_text = re.sub(r'<.*?>', '', text)
+    return cleaned_text
+
 
 async def main():
     pool = await connect_to_db_pool()
@@ -187,8 +258,16 @@ async def main():
 
         await asyncio.gather(*tasks)
 
+        translation_task = asyncio.create_task(translate_and_send())
+
+        await asyncio.sleep(0)  
+
+        message_queue.put(None)
+        await translation_task
+
     pool.close()
     await pool.wait_closed()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
