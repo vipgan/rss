@@ -20,17 +20,14 @@ load_dotenv()
 # RSS 源列表
 RSS_FEEDS = [
     ('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC World News'),  
-    ('http://rss.cnn.com/rss/cnn_topstories.rss', 'CNN Top Stories'),  
-    ('https://www.federalreserve.gov/feeds/h10.xml', 'Foreign Exchange Rates'),  
-    ('http://www.nhk.or.jp/lesson/common/rss/lesson/chinese.xml', 'nhk'),  
-    ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),  
-    ('http://rss.cnn.com/rss/edition.rss', 'CNN'),  
- #   ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),  
     ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),  
+    ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),  
+    ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),  
 ]
 
 SECOND_RSS_FEEDS = [
-    # ('https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', '苏恒观察'), 
+  #  ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),  
+
 ]
 
 # Telegram 配置

@@ -159,15 +159,6 @@ def get_email_body(msg):
         
     return clean_email_body(body)
 
-# 清理邮件主题
-def clean_subject(subject):
-    return re.sub(r'[^\w\s]', '', subject)
-def clean_subject(name):
-    return re.sub(r'[^\w\s]', '', name)
-def clean_subject(body):
-    # 去除 Markdown 中的斜体星号 *
-    return re.sub(r'\*', '', body)
-
 # 获取并处理未读邮件
 def fetch_emails():
     sent_mail = load_sent_mail()  # 已发送的邮件集合
@@ -224,6 +215,8 @@ def fetch_emails():
 
                 url = f"https://mail.qq.com/{sender}"
 
+                subject = re.sub(r'[^\w\s]', '', subject)
+                name = re.sub(r'[^\w\s]', '', name)
                 message = f'''
 ✉️ *{name}* <{email_address}>
 {subject}
