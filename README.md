@@ -4,7 +4,7 @@ chmod +x ~/rss/rss2.sh
 chmod +x ~/rss/setup.sh  
 chmod +x ~/rss/mail.sh  
 # 安装
-~/rss/setup.sh  
+/bin/bash ~/rss/setup.sh  
 
 
 crontab -e
