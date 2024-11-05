@@ -79,13 +79,16 @@ async def send_message(bot, chat_id, text, format_type='Markdown', chunk_size=40
                     await bot.send_message(**kwargs)
                 except Exception as e:
                     logging.error(f"Markdown format sending failed for chunk: {e}")
-                    await bot.send_message(chat_id=chat_id, text=chunk)
+                    # 如果 Markdown 格式发送失败，尝试使用普通文本格式发送
+                    await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=None)
         else:
             for i in range(0, len(text), chunk_size):
                 chunk = text[i:i + chunk_size]
                 await bot.send_message(chat_id=chat_id, text=chunk)
     except Exception as e:
         logging.error(f"Failed to send message: {e}")
+        # 当出现其他错误时，也尝试使用普通文本格式发送原文
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=None)
 
 
 async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
@@ -106,16 +109,20 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
         if (url, subject, message_id) not in sent_entries:
             original_message_parts = []
             if subject:
-                translated_subject = await auto_translate_text(subject)
-                original_message_parts.append(f"*{translated_subject}*")
+                if feed not in SECOND_RSS_FEEDS:
+                    translated_subject = await auto_translate_text(subject)
+                    original_message_parts.append(f"*{translated_subject}*")
+                else:
+                    original_message_parts.append(f"*{subject}*")
             else:
                 original_message_parts.append("*无标题*")
 
             if summary:
-                translated_summary = await auto_translate_text(summary)
-                original_message_parts.append(translated_summary)
-            else:
-                original_message_parts.append("无简介")
+                if feed not in SECOND_RSS_FEEDS:
+                    translated_summary = await auto_translate_text(summary)
+                    original_message_parts.append(translated_summary)
+                else:
+                    original_message_parts.append(summary)
 
             if url:
                 source_link = f"[{feed[1]}]({url})"
@@ -187,11 +194,11 @@ async def translate_and_send():
                 if part.startswith("*"):
                     subject = part.replace('*', '').strip()
                     translated_subject = await auto_translate_text(subject)
-                    translated_message_parts.append(f"*{translated_subject}*")
+                    translated_message_parts.append(f"*{sanitize_markdown(translated_subject)}*")
                 else:
                     if not part.startswith("["):
                         translated_part = await auto_translate_text(part)
-                        translated_message_parts.append(translated_part)
+                        translated_message_parts.append(sanitize_markdown(translated_part))
                     else:
                         translated_message_parts.append(part)
             translated_message = "\n\n".join(translated_message_parts)
@@ -201,9 +208,9 @@ async def translate_and_send():
         except Exception as e:
             logging.error(f"Error in translation and sending: {e}")
 
-
 async def auto_translate_text(text):
     try:
+
         cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
         httpProfile = HttpProfile()
         httpProfile.endpoint = "tmt.tencentcloudapi.com"
@@ -219,7 +226,8 @@ async def auto_translate_text(text):
         req.ProjectId = 0
 
         print(f"Sending translation request for text: {text}")
-        resp = client.TextTranslate(req)
+        resp = client.TextTranslate(req)             
+        await asyncio.sleep(1)   # 翻译逻辑等待 1 秒
         return resp.TargetText
     except Exception as e:
         logging.error(f"Translation error for text '{text}': {e}")
@@ -230,6 +238,8 @@ async def auto_translate_text(text):
 def sanitize_markdown(text):
     # 移除可能的 HTML 标签
     cleaned_text = re.sub(r'<.*?>', '', text)
+    # 移除除了星号和方括号之外的其他可能导致问题的 Markdown 符号
+    cleaned_text = re.sub(r'[~`_>#+-=|\{}]', '', cleaned_text)
     return cleaned_text
 
 
