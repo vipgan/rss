@@ -12,5 +12,5 @@ fi
 sleep 1
 # 运行 RSS2 脚本
 source ~/rss/rss_venv/bin/activate
-python3 ~/rss/rss2.py &
+nohup python3 ~/rss/rss2.py
 deactivate
