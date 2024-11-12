@@ -19,24 +19,30 @@ load_dotenv()
 
 # RSS 源列表
 RSS_FEEDS = [
-    ('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC World News'),
-    ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
+    ('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC'),
+  #  ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
   #  ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),
   #  ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
-    ('https://www3.nhk.or.jp/rss/news/cat6.xml', 'NHK World'),
+    ('https://www3.nhk.or.jp/rss/news/cat6.xml', 'NHK'),
   #  ('https://www3.nhk.or.jp/rss/news/cat5.xml', 'NHK 商业'),
   #  ('https://www.ft.com/?format=rss', '金融时报'),
+
 
 ]
 
 SECOND_RSS_FEEDS = [
-    # ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
+   #  ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
+    ('https://blog.090227.xyz/atom.xml', 'CM'),
+    ('https://www.freedidi.com/feed', '零度解说'),
+    ('https://rsshub.penggan.us.kg/guancha/headline', '观察网'),
+    ('https://rsshub.penggan.us.kg/zaobao/znews/china', '联合早报'),
+    ('https://rsshub.penggan.us.kg/zaobao/realtime/world', '联合早报国际'),
 
 ]
 
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-SECOND_TELEGRAM_BOT_TOKEN = os.getenv("SECOND_TELEGRAM_BOT_TOKEN")
+RSSTWO_TELEGRAM_BOT_TOKEN = os.getenv("RSSTWO_TELEGRAM_BOT_TOKEN")
 ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
 
 # 数据库连接配置
@@ -85,7 +91,7 @@ async def send_single_message(bot, chat_id, text, format_type='Markdown', disabl
         logging.error(f"Failed to send single message: {e}")
 
 
-async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
+async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name, translate=True):
     feed_data = await fetch_feed(session, feed)
     if feed_data is None:
         return []
@@ -94,48 +100,31 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
     messages = []
 
     for entry in feed_data.entries:
-        subject = entry.title if entry.title else None
-        url = entry.link if entry.link else None
-        summary = entry.summary if hasattr(entry, 'summary') else "暂无简介"
-
-        message_id = f"{subject}_{url}" if subject and url else None
+        subject = entry.title or "*无标题*"
+        url = entry.link
+        summary = getattr(entry, 'summary', "暂无简介")
+        message_id = f"{subject}_{url}"
 
         if (url, subject, message_id) not in sent_entries:
-            original_message_parts = []
-            if subject:
+            if translate:
                 translated_subject = await auto_translate_text(subject)
-                original_message_parts.append(f"*{translated_subject}*")
-            else:
-                original_message_parts.append("*无标题*")
-
-            if summary:
                 translated_summary = await auto_translate_text(summary)
-                original_message_parts.append(translated_summary)
             else:
-                original_message_parts.append("无简介")
+                translated_subject = subject
+                translated_summary = summary
 
-            if url:
-                source_link = f"[{feed[1]}]({url})"
-                original_message_parts.append(source_link)
-
-            combined_message = "\n\n".join(original_message_parts)
+            combined_message = f"*{translated_subject}*\n\n{translated_summary}\n\n[{feed[1]}]({url})"
             messages.append(combined_message)
             new_entries.append((url, subject, message_id))
 
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            await save_sent_entry_to_db(
-                pool,
-                url if url else current_time,
-                subject if subject else current_time,
-                message_id if message_id else current_time,
-                table_name
-            )
+            await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
             sent_entries.add((url, subject, message_id))
 
     for message in messages:
-        message_queue.put((message, bot, allowed_chat_ids))
-    return new_entries
+        for chat_id in allowed_chat_ids:
+            await send_single_message(bot, chat_id, message)
 
+    return new_entries
 
 async def connect_to_db_pool():
     try:
@@ -235,34 +224,26 @@ async def main():
         logging.error("Failed to connect to the database.")
         return
 
-    sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
-    sent_entries_second = await load_sent_entries_from_db(pool, "sent_rss2")
+    async with pool:
+        sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
+        sent_entries_second = await load_sent_entries_from_db(pool, "sent_rss2")
 
-    async with aiohttp.ClientSession() as session:
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        second_bot = Bot(token=SECOND_TELEGRAM_BOT_TOKEN)
+        async with aiohttp.ClientSession() as session:
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            second_bot = Bot(token=RSSTWO_TELEGRAM_BOT_TOKEN)
 
-        tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
-            for feed in RSS_FEEDS
-        ]
-        tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_rss2")
-            for feed in SECOND_RSS_FEEDS
-        ]
+            tasks = [
+                process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss", translate=True)
+                for feed in RSS_FEEDS
+            ] + [
+                process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_rss2", translate=False)
+                for feed in SECOND_RSS_FEEDS
+            ]
 
-        await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
 
-        translation_task = asyncio.create_task(translate_and_send())
-
-        await asyncio.sleep(0)
-
-        message_queue.put(None)
-        await translation_task
-
-    pool.close()
-    await pool.wait_closed()
-
+        pool.close()
+        await pool.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
