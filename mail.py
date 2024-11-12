@@ -89,7 +89,7 @@ def save_sent_mail_to_db(mail_entries):
 # 发送消息到 Telegram
 def send_message(text):
     try:
-        MAX_MESSAGE_LENGTH = 4000
+        MAX_MESSAGE_LENGTH = 4096
         messages = [text[i:i + MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
         
         for message_part in messages:
@@ -225,9 +225,9 @@ def fetch_emails():
                 url = f"https://mail.qq.com/{sender}"
 
                 message = f'''
-✉️ *{name}* <{email_address}>
-{subject}
-
+*{name}* <{email_address}>
+*{subject}*
+✉️
 {body}
 '''
                 send_message(message)

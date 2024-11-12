@@ -1,16 +1,77 @@
+import os
 import asyncio
 import aiohttp
 import aiomysql
 import logging
+from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
-from config import (
-    RSS_FEEDS, SECOND_RSS_FEEDS, TELEGRAM_BOT_TOKEN, SECOND_TELEGRAM_BOT_TOKEN,
-    ALLOWED_CHAT_IDS, DB_CONFIG, auto_translate_text
-)
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.tmt.v20180321 import tmt_client, models
 
-# 消息队列，用于存储待翻译和推送的消息
+# Load environment variables
+load_dotenv()
+
+# RSS Feeds
+RSS_FEEDS = [
+    ('https://feeds.bbci.co.uk/news/world/rss.xml', 'BBC World'),
+  #  ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
+  #  ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),
+  #  ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
+    ('https://www3.nhk.or.jp/rss/news/cat6.xml', 'NHK World'),
+  #  ('https://www3.nhk.or.jp/rss/news/cat5.xml', 'NHK 商业'),
+  #  ('https://www.ft.com/?format=rss', '金融时报'),
+
+]
+
+SECOND_RSS_FEEDS = [
+    # ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
+
+]
+
+# Telegram Config
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+SECOND_TELEGRAM_BOT_TOKEN = os.getenv("SECOND_TELEGRAM_BOT_TOKEN")
+ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+
+# Database Config
+DB_CONFIG = {
+    'host': os.getenv("DB_HOST"),
+    'db': os.getenv("DB_NAME"),
+    'user': os.getenv("DB_USER"),
+    'password': os.getenv("DB_PASSWORD"),
+    'minsize': 1,
+    'maxsize': 10
+}
+
+# Tencent Cloud Translation Config
+TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
+TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
+
+# Message queue for translating and pushing messages
 message_queue = asyncio.Queue()
+
+async def auto_translate_text(text):
+    """Automatically translate text to Chinese."""
+    try:
+        cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
+        http_profile = HttpProfile(endpoint="tmt.tencentcloudapi.com")
+        client_profile = ClientProfile(httpProfile=http_profile)
+        client = tmt_client.TmtClient(cred, "ap-guangzhou", client_profile)
+
+        req = models.TextTranslateRequest()
+        req.SourceText = text
+        req.Source = "auto"
+        req.Target = "zh"
+        req.ProjectId = 0
+
+        resp = client.TextTranslate(req)
+        return resp.TargetText
+    except Exception as e:
+        logging.error(f"Translation error for text '{text}': {e}")
+        return text
 
 async def fetch_feed(session, feed):
     try:
@@ -46,7 +107,6 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
         summary = getattr(entry, 'summary', "暂无简介")
         message_id = f"{subject}_{url}"
 
-        # 仅处理未发送过的条目
         if (url, subject, message_id) not in sent_entries:
             translated_subject = await auto_translate_text(subject)
             translated_summary = await auto_translate_text(summary)
@@ -58,7 +118,6 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
             await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
             sent_entries.add((url, subject, message_id))
 
-    # 发送消息
     for message in messages:
         for chat_id in allowed_chat_ids:
             await send_single_message(bot, chat_id, message)
@@ -104,7 +163,6 @@ async def main():
         return
 
     async with pool:
-        # 载入已发送记录，避免重复处理
         sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
         sent_entries_second = await load_sent_entries_from_db(pool, "sent_rss2")
 
