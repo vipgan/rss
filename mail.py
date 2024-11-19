@@ -95,7 +95,7 @@ def send_message(text):
         for message_part in messages:
             # 尝试使用 Markdown 格式推送
             response = requests.post(f'https://api.telegram.org/bot{TELEGRAM_API_KEY}/sendMessage',
-                                     data={'chat_id': TELEGRAM_CHAT_ID, 'text': message_part, 'parse_mode': 'Markdown'})
+                                     data={'chat_id': TELEGRAM_CHAT_ID, 'text': message_part, 'parse_mode': 'Markdown', 'disable_web_page_preview': 'true'})
             
             if response.status_code == 200:
                 logger.info(f"Message sent successfully in Markdown format: {message_part[:50]}...")  # 记录成功推送的前50字符
@@ -106,7 +106,7 @@ def send_message(text):
 
                 # 失败时使用纯文本推送
                 response = requests.post(f'https://api.telegram.org/bot{TELEGRAM_API_KEY}/sendMessage',
-                                         data={'chat_id': TELEGRAM_CHAT_ID, 'text': message_part})
+                                         data={'chat_id': TELEGRAM_CHAT_ID, 'text': message_part, 'disable_web_page_preview': 'true'})
 
                 if response.status_code == 200:
                     logger.info(f"Message sent successfully in plain text format: {message_part[:50]}...")
@@ -135,15 +135,46 @@ def decode_header(header):
         for fragment, encoding in decoded_fragments
     )
 
-# 清理邮件正文
+# 清理邮件主题
+def clean_subject(subject):
+    """
+    清理邮件主题，去除特殊字符、方括号 [ ] 和 Markdown 中的星号 *。
+    """
+    # 去除特殊字符和方括号
+    subject = re.sub(r'[^\w\s]', '', subject).replace('[', '').replace(']', '')
+    # 去除 Markdown 中的星号 *
+    subject = re.sub(r'\*', '', subject)
+    return subject
+
+# 获取并清理邮件正文，去除图片和视频标签，只保留链接
 def clean_email_body(body):
+    """
+    清理邮件正文内容，移除图片和视频标签，替换为链接，保持简洁。
+    """
     soup = BeautifulSoup(body, 'html.parser')
+    
+    # 处理图片标签 <img>
+    for img_tag in soup.find_all('img'):
+        img_src = img_tag.get('src')
+        if img_src:
+            img_tag.replace_with(f"[Image]({img_src})")  # 替换为图片链接
+
+    # 处理视频标签 <video>
+    for video_tag in soup.find_all('video'):
+        video_src = video_tag.find('source')['src'] if video_tag.find('source') else video_tag.get('src')
+        if video_src:
+            video_tag.replace_with(f"[Video]({video_src})")  # 替换为视频链接
+
+    # 提取正文内容
     text = soup.get_text()
-    text = re.sub(r'\n\s*\n+', '\n', text)
+    text = re.sub(r'\n\s*\n+', '\n', text)  # 去除多余的空行
     return text.strip()
 
 # 获取邮件正文
 def get_email_body(msg):
+    """
+    从邮件中提取正文内容，支持多部分格式。
+    """
     body = ""
     if msg.is_multipart():
         for part in msg.walk():
@@ -158,15 +189,6 @@ def get_email_body(msg):
         body = msg.get_payload(decode=True).decode(charset, errors='ignore')
         
     return clean_email_body(body)
-
-# 清理邮件主题
-def clean_subject(subject):
-    return re.sub(r'[^\w\s]', '', subject)
-def clean_subject(name):
-    return re.sub(r'[^\w\s]', '', name)
-def clean_subject(body):
-    # 去除 Markdown 中的斜体星号 *
-    return re.sub(r'\*', '', body)
 
 # 获取并处理未读邮件
 def fetch_emails():
@@ -225,9 +247,9 @@ def fetch_emails():
                 url = f"https://mail.qq.com/{sender}"
 
                 message = f'''
-*{name}* <{email_address}>
-*{subject}*
-✉️
+✉️ *{name}* <{email_address}>
+{subject}
+
 {body}
 '''
                 send_message(message)

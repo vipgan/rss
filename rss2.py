@@ -16,16 +16,22 @@ load_dotenv()
 
 # RSS 源列表
 RSS_FEEDS = [
-  # 'https://blog.090227.xyz/atom.xml',  # CM
-   # 'https://www.freedidi.com/feed', # 零度解说
-   # 'https://rsshub.app/bilibili/hot-search', # bilibili
-   # 'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5c91d2e23882afa09dff4901', # 36氪 - 24小时热榜
-   # 'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5cac99a7f5648c90ed310e18', # 微博热搜
-   # 'https://rss.mifaw.com/articles/5c8bb11a3c41f61efd36683e/5cf92d7f0cc93bc69d082608', # 百度热搜榜
-   # 'https://rsshub.app/guancha/headline', # 观察网
-   # 'https://rsshub.app/zaobao/znews/china', # 联合早报
-   # 'https://36kr.com/feed',    # 36氪 
-    # 添加更多 RSS 源
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCrbQxu0YkoVWu2dw5b1MzNg', # 联合早报
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油  
 ]
 
 SECOND_RSS_FEEDS = [
@@ -39,7 +45,7 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCG_gH6S-2ZUOtEw27uIS_QA', # 7Car小七車觀點
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCJ5rBA0z4WFGtUTS83sAb_A', # POP Radio聯播網
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCiwt1aanVMoPYUt_CQYCPQg', # 全球大視野
-
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC000Jn3HGeQSwBuX_cLDK8Q', # 我是柳傑克
 # 影视
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC7Xeh7thVIgs_qfTlwC-dag', # Marc TV
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCqWNOHjgfL8ADEdXGznzwUw', # 悦耳音乐酱
@@ -66,31 +72,36 @@ DB_CONFIG = {
     'maxsize': 10
 }
 
-async def fetch_feed(session, feed):
+async def fetch_feed(session, feed_url):
     try:
-        async with session.get(feed, timeout=88) as response:
+        async with session.get(feed_url, timeout=88) as response:
             response.raise_for_status()
             content = await response.read()
-            return parse(content)
+            parsed_feed = parse(content)
+            feed_title = parsed_feed.feed.get('title', '未命名来源')  # 获取 RSS 名称
+            return parsed_feed, feed_title
     except Exception as e:
-        logging.error(f"Error fetching {feed}: {e}")
-        return None
+        logging.error(f"Error fetching {feed_url}: {e}")
+        return None, None
+
 
 async def send_message(bot, chat_id, text, chunk_size=4096):
     for i in range(0, len(text), chunk_size):
         chunk = text[i:i + chunk_size]
         try:
-            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.MARKDOWN)
+            # 使用 HTML 格式推送消息
+            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML)
         except Exception as e:
-            logging.error(f"Failed to send Markdown message: {e}. Retrying with plain text.")
+            logging.error(f"Failed to send HTML message: {e}. Retrying with plain text.")
             try:
+                # 回退到原文推送
                 await bot.send_message(chat_id=chat_id, text=chunk)
             except Exception as e:
                 logging.error(f"Failed to send fallback plain text message: {e}")
 
-async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
-    feed_data = await fetch_feed(session, feed)
-    if feed_data is None:
+async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_ids, table_name):
+    feed_data, feed_title = await fetch_feed(session, feed_url)
+    if feed_data is None or feed_title is None:
         return []
 
     new_entries = []
@@ -101,17 +112,14 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
         url = entry.link if entry.link else None
 
         if subject:
-            # 清理标题中的非字母数字字符
+            # 添加来源名称到消息中
+            subject = f"{subject}"
             subject = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '', subject)
 
         message_id = f"{subject}_{url}" if subject and url else None
 
-        # 如果 URL 存在，进行 URL 编码
-        if url:
-            url = urllib.parse.quote(url, safe=':/?&=~')  # 对 URL 进行编码，保留常见的特殊字符
-
         if (url, subject, message_id) not in sent_entries:
-            message = f"*{subject}*\n{url}\n\n"
+            message = f"<b>{subject}</b>\n{feed_title}\n{url}"
             messages.append(message)
             new_entries.append((url, subject, message_id))
 
@@ -126,7 +134,7 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
             sent_entries.add((url, subject, message_id))
 
     if messages:
-        combined_message = "\n\n".join(messages)
+        combined_message = "\n\n".join(messages)  # 使用换行符拼接消息
         for chat_id in allowed_chat_ids:
             await send_message(bot, chat_id, combined_message)
         await asyncio.sleep(6)
