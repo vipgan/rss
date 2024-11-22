@@ -37,15 +37,13 @@ jobs:
 
       - name: Run rss.py
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          RSS_BOT_TOKEN_TWO: ${{ secrets.RSS_BOT_TOKEN_TWO }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          SECOND_TELEGRAM_BOT_TOKEN: ${{ secrets.SECOND_TELEGRAM_BOT_TOKEN }}
-          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
-          SECOND_ALLOWED_CHAT_IDS: ${{ secrets.SECOND_ALLOWED_CHAT_IDS }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          IMAP_SERVER: ${{ secrets.IMAP_SERVER }}
+          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
         run: python rss.py  # 运行你的脚本，替换为实际脚本名
