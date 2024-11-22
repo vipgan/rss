@@ -1,8 +1,8 @@
-name: Run RSS Script
+name: Run RSS2 Script
 
 on:
   schedule:
-    # 每2个小时运行一次
+    # 定时任务设置为每天的 UTC 时间 02:00 运行
     - cron: '0 */2 * * *'
   workflow_dispatch:  # 手动触发
 
@@ -26,13 +26,11 @@ jobs:
 
       - name: Run RSS Script
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          RSS_BOT_TOKEN_TWO: ${{ secrets.RSS_BOT_TOKEN_TWO }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          YOUTUBE_BOT_TOKEN_TWO: ${{ secrets.YOUTUBE_BOT_TOKEN_TWO }}
+          YOUTUBE_BOT_TOKEN_ONE: ${{ secrets.YOUTUBE_BOT_TOKEN_ONE }}
+          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
-          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
-        run: python rss.py
+        run: python rss2.py
