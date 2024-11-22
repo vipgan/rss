@@ -18,7 +18,7 @@ load_dotenv()
 # RSS 配置
 RSS_FEEDS = [
     'https://feeds.bbci.co.uk/news/world/rss.xml',
-    'https://www3.nhk.or.jp/rss/news/cat6.xml',
+ #   'https://www3.nhk.or.jp/rss/news/cat6.xml',
   #  ('https://www.cnbc.com/id/100003114/device/rss/rss.html', 'CNBC'),
   #  ('https://feeds.a.dj.com/rss/RSSWorldNews.xml', '华尔街日报'),
   #  ('https://www.aljazeera.com/xml/rss/all.xml', '半岛电视台'),
@@ -28,16 +28,17 @@ RSS_FEEDS = [
 ]
 
 THIRD_RSS_FEEDS = [
-    'https://36kr.com/feed',
+ #   'https://36kr.com/feed',
     'https://rsshub.penggan0.us.kg/10jqka/realtimenews',
   #  'https://blog.090227.xyz/atom.xml',
   #  'https://www.freedidi.com/feed',
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCrbQxu0YkoVWu2dw5b1MzNg', # 联合早报
 ]
 
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-SANG_TELEGRAM_BOT_TOKEN = os.getenv("SANG_TELEGRAM_BOT_TOKEN")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+RSS_BOT_TOKEN_TWO = os.getenv("RSS_BOT_TOKEN_TWO")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 数据库连接配置
 DB_CONFIG = {
@@ -121,7 +122,7 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, table_name, t
 
             cleaned_subject = sanitize_markdown(translated_subject)
             message = f"*{cleaned_subject}*\n{translated_summary}\n[{source_name}]({url})"
-            await send_single_message(bot, ALLOWED_CHAT_IDS[0], message)
+            await send_single_message(bot, TELEGRAM_CHAT_ID[0], message)
 
             new_entries.append((url, subject, message_id))
             await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
@@ -152,7 +153,7 @@ async def process_third_feed(session, feed_url, sent_entries, pool, bot, table_n
 
     if merged_message:
         # 合并后的消息推送
-        await send_single_message(bot, ALLOWED_CHAT_IDS[0], merged_message, disable_web_page_preview=True)
+        await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=True)
 
     return []
 
@@ -198,7 +199,7 @@ async def main():
 
         async with aiohttp.ClientSession() as session:
             bot = Bot(token=TELEGRAM_BOT_TOKEN)
-            third_bot = Bot(token=SANG_TELEGRAM_BOT_TOKEN)
+            third_bot = Bot(token=RSS_BOT_TOKEN_TWO)
 
             tasks = [
                 process_feed(session, feed_url, sent_entries, pool, bot, "sent_rss", translate=True)

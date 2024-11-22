@@ -16,7 +16,6 @@ load_dotenv()
 
 # RSS 源列表
 RSS_FEEDS = [
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCrbQxu0YkoVWu2dw5b1MzNg', # 联合早报
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
@@ -55,11 +54,13 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UClyVC2wh_2fQhU0hPdXA4rw', # 热门古风曲
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC1ISajIKfRN359MMmtckUTg', # Taiwanese Pop Mix
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCQFyMGc6h30NMCd6HCk0ZPA', # 哔哩哔哩动画
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC6-ZYliTgo4aTKcLIDUw0Ag', # 音樂花園
 ]
 
 # Telegram 配置
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-SECOND_TELEGRAM_BOT_TOKEN = os.getenv("SECOND_TELEGRAM_BOT_TOKEN")
+YOUTUBE_BOT_TOKEN_TWO = os.getenv("YOUTUBE_BOT_TOKEN_TWO")
+YOUTUBE_BOT_TOKEN_ONE = os.getenv("YOUTUBE_BOT_TOKEN_ONE")
 ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
 
 # 数据库连接配置
@@ -112,9 +113,10 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_
         url = entry.link if entry.link else None
 
         if subject:
-            # 添加来源名称到消息中
+            # 添加来源名称到消息中并保留标点符号
             subject = f"{subject}"
-            subject = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]+', '', subject)
+            # 修改正则表达式以保留标点符号
+            subject = re.sub(r'[^\w\s\u4e00-\u9fa5.,!?;:"\'()\-]+', '', subject)
 
         message_id = f"{subject}_{url}" if subject and url else None
 
@@ -181,8 +183,8 @@ async def main():
     sent_entries_second = await load_sent_entries_from_db(pool, "sent_youtube")
 
     async with aiohttp.ClientSession() as session:
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        second_bot = Bot(token=SECOND_TELEGRAM_BOT_TOKEN)
+        bot = Bot(token=YOUTUBE_BOT_TOKEN_TWO)
+        second_bot = Bot(token=YOUTUBE_BOT_TOKEN_ONE)
 
         tasks = [
             process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
