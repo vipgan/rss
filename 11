@@ -13,7 +13,6 @@ import os
 from dotenv import load_dotenv
 import json
 import hashlib
-import html
 import asyncio
 from bs4 import BeautifulSoup
 
@@ -78,13 +77,13 @@ async def send_message(text):
         
         for message_part in messages:
             try:
-                # 发送消息并处理 Markdown 格式
-                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-                logger.info(f"消息以 Markdown 格式成功发送: {message_part[:50]}...")
+                # 发送消息并处理 MarkdownV2 格式
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True)
+                logger.info(f"消息以 MarkdownV2 格式成功发送: {message_part[:50]}...")
             except Exception as e:
-                logger.warning(f"以 Markdown 格式发送消息失败: {e}。切换到纯文本格式。")
+                logger.warning(f"以 MarkdownV2 格式发送消息失败: {e}。切换到纯文本格式。")
                 try:
-                    # 如果 Markdown 发送失败，则尝试发送纯文本格式
+                    # 如果 MarkdownV2 发送失败，则尝试发送纯文本格式
                     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, disable_web_page_preview=True)
                     logger.info(f"消息以纯文本格式成功发送: {message_part[:50]}...")
                 except Exception as e:
@@ -117,22 +116,36 @@ def clean_subject(subject):
     
     return subject
 
+def sanitize_markdown_v2(text):
+    """
+    清理文本以适配 Telegram MarkdownV2 的要求，避免格式错误。
+    """
+    escape_chars = r'\\`*_{}\[\]()#+\-.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
 def clean_email_body(body):
     # 使用 BeautifulSoup 解析 HTML
     soup = BeautifulSoup(body, 'html.parser')
-    # 获取文本内容
+    
+    # 转换链接为 MarkdownV2 格式
+    for a in soup.find_all('a', href=True):
+        link_text = sanitize_markdown_v2(a.get_text().strip() or a['href'])
+        a.replace_with(f"[{link_text}]({sanitize_markdown_v2(a['href'])})")
+    
+    # 获取转换后的文本
     text = soup.get_text()
     
     # 处理连续的空行
     text = re.sub(r'\n\s*\n+', '\n', text)
     
-    # 去除多余的空白和连字符
+    # 去除多余的符号
     text = re.sub(r'-{2,}', '-', text)
     text = re.sub(r'\*{2,}', '*', text)
     text = re.sub(r'—{4,}', '—' * 8, text)
-    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'<[^>]+>', '', text)  # 删除多余的 HTML 标签
 
-    return text.strip()
+    # 清理多余的空白
+    return sanitize_markdown_v2(text.strip())
 
 # 获取邮件正文
 def get_email_body(msg):
@@ -154,7 +167,6 @@ def get_email_body(msg):
         
     return clean_email_body(body)
 
-# 获取并处理未读邮件
 async def fetch_emails():
     sent_mail = load_sent_mail()  # 已发送的邮件集合
     new_sent_mail = []
@@ -164,60 +176,59 @@ async def fetch_emails():
         mail.login(email_user, email_password)
         mail.select('inbox')
 
+        # 搜索未读邮件
         status, messages = mail.search(None, '(UNSEEN)')
         if status != 'OK':
-            logger.error("搜索邮件时出错")
+            logger.error("搜索未读邮件时出错")
             return
-        
+
         email_ids = messages[0].split()
-        
+
         for email_id in email_ids:
             try:
+                # 获取邮件内容
                 _, msg_data = mail.fetch(email_id, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
 
+                # 计算邮件哈希值避免重复发送
                 email_hash = get_email_hash(msg)
                 if email_hash in sent_mail:
-                    logger.info(f"邮件哈希值 {email_hash} 已发送过。")
+                    logger.info(f"邮件哈希值 {email_hash} 已存在，跳过发送。")
                     continue
 
-                subject = clean_subject(decode_header(msg['subject']))
+                # 解析邮件基本信息
+                subject = sanitize_markdown_v2(clean_subject(decode_header(msg['subject'])))
                 sender = decode_header(msg['from'])
+                name, email_address = map(sanitize_markdown_v2, parseaddr(sender))
 
-                # 解析发件人
-                name, email_address = parseaddr(sender)
-                
-                # 检查邮件日期字段
+                # 获取并格式化邮件日期
                 date_str = msg.get('date')
-                if date_str is None:
-                    logger.warning(f"邮件 ID {email_id} 没有日期头部，使用当前时间作为备用。")
+                try:
+                    email_date = parsedate_to_datetime(date_str) if date_str else datetime.now()
+                    email_date_bj = email_date.astimezone(pytz.timezone('Asia/Shanghai'))
+                except Exception as e:
+                    logger.warning(f"解析邮件日期时出错，使用当前时间: {e}")
                     email_date_bj = datetime.now(pytz.timezone('Asia/Shanghai'))
-                else:
-                    try:
-                        email_date = parsedate_to_datetime(date_str)
-                        email_date_bj = email_date.astimezone(pytz.timezone('Asia/Shanghai'))
-                    except Exception as e:
-                        logger.warning(f"解析邮件 ID {email_id} 的日期时出错: {e}，使用当前时间作为备用。")
-                        email_date_bj = datetime.now(pytz.timezone('Asia/Shanghai'))
 
-                body = get_email_body(msg)
+                # 获取并清理邮件正文
+                body = sanitize_markdown_v2(get_email_body(msg))
 
-                url = f"https://mail.qq.com/{sender}"
+                # 构建消息内容
+                message = (
+                    f"✉️ *{name}* <{email_address}>\n"
+                    f"*主题*: {subject}\n\n"
+                    f"{body}"
+                )
 
-                message = f'''
-✉️ *{name}* <{email_address}>
-{subject}
-
-{body}
-'''
+                # 发送消息
                 await send_message(message)
 
+                # 记录已发送邮件
                 new_sent_mail.append({
-                    'url': url,
-                    'subject': subject,
                     'message_id': email_hash,
                     'from_name': name,
-                    'from_email': email_address
+                    'from_email': email_address,
+                    'subject': subject,
                 })
 
             except Exception as e:
@@ -226,7 +237,11 @@ async def fetch_emails():
     except Exception as e:
         logger.error(f"获取邮件时出错: {e}")
     finally:
-        mail.logout()
+        try:
+            mail.logout()
+        except Exception as e:
+            logger.error(f"登出邮件服务器时出错: {e}")
+
         if new_sent_mail:
             save_sent_mail_to_db(new_sent_mail)
 

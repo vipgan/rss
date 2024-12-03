@@ -15,7 +15,6 @@ import json
 import hashlib
 import html
 import asyncio
-from bs4 import BeautifulSoup
 
 # 设置日志记录并分级
 logging.basicConfig(level=logging.INFO)
@@ -118,21 +117,43 @@ def clean_subject(subject):
     return subject
 
 def clean_email_body(body):
-    # 使用 BeautifulSoup 解析 HTML
-    soup = BeautifulSoup(body, 'html.parser')
-    # 获取文本内容
-    text = soup.get_text()
-    
-    # 处理连续的空行
-    text = re.sub(r'\n\s*\n+', '\n', text)
-    
-    # 去除多余的空白和连字符
-    text = re.sub(r'-{2,}', '-', text)
-    text = re.sub(r'\*{2,}', '*', text)
-    text = re.sub(r'—{4,}', '—' * 8, text)
-    text = re.sub(r'<[^>]+>', '', text)
+    # 解码 HTML 实体
+    body = html.unescape(body)
 
-    return text.strip()
+    # Escape Markdown special characters
+    markdown_escape = ['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '|']
+    for char in markdown_escape:
+        body = body.replace(char, '\\' + char)
+
+    # Remove HTML tags but keep the content
+    body = re.sub(r'<[^>]+>', '', body)
+
+    # Replace common HTML entities with Markdown equivalents
+    body = body.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    # Handle links
+    body = re.sub(r'https?://\S+', lambda m: f'[{m.group(0)}]({m.group(0)})', body)
+
+    # Custom replacements
+    body = body.replace('<`>', '-').replace('<_>', '-').replace('<*>', '-').replace('</p>', '\n')
+
+    # Clean up extra whitespace and dashes
+    body = re.sub(r'\s+', ' ', body)  # Replace multiple spaces with a single space
+    body = re.sub(r'-{2,}', '-', body)  # Replace multiple dashes with one
+    body = re.sub(r'\*{2,}', '*', body)  # Clean up excess asterisks
+    body = re.sub(r'—{4,}', '—' * 8, body)  # Limit em-dashes
+
+    # Remove empty lines
+    body = remove_empty_lines(body)
+
+    # Ensure no unintended Markdown formatting
+    body = body.replace('\\', '')  # Remove backslashes added for escaping
+
+    return body
+
+def remove_empty_lines(text):
+    # Remove all empty lines including lines with only whitespace
+    return '\n'.join(line for line in text.splitlines() if line.strip())
 
 # 获取邮件正文
 def get_email_body(msg):
