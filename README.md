@@ -2,7 +2,8 @@ git clone https://github.com/penggan00/rss.git
 chmod +x ~/rss/rss.sh  
 chmod +x ~/rss/rss2.sh  
 chmod +x ~/rss/setup.sh  
-chmod +x ~/rss/mail.sh  
+chmod +x ~/rss/mail.sh
+chmod +x ~/rss/time.sh
 # 安装
 /bin/bash ~/rss/setup.sh  
 

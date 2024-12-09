@@ -170,7 +170,7 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, table_name, t
             sent_entries.add((url, subject, message_id))
 
     return new_entries
-# 主题+内容
+# 主题+内容 超过1000字节不发送
 async def process_third_feed(session, feed_url, sent_entries, pool, bot, table_name):
     feed_data = await fetch_feed(session, feed_url)
     if feed_data is None:
@@ -186,23 +186,26 @@ async def process_third_feed(session, feed_url, sent_entries, pool, bot, table_n
         summary = sanitize_markdown(summary)
         message_id = f"{subject}_{url}"
 
-        # 截断文章内容为前500字
-     #   truncated_summary = summary[:500]
-     #   if len(summary) > 500:
-     #       truncated_summary += "..."  # 超过500字的部分加上省略号
-
         if (url, subject, message_id) not in sent_entries:
             cleaned_subject = sanitize_markdown(subject)
-            merged_message += f"*{cleaned_subject}*\n{summary}\n[{source_name}]({url})\n\n"
 
-            sent_entries.add((url, subject, message_id))
-            await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
+            # 检查主题和内容的字节长度
+            total_length = len(cleaned_subject.encode('utf-8')) + len(summary.encode('utf-8'))
+            if total_length > 1000:
+                # 超过 1000 字节的内容直接跳过，不发送
+                continue
+            else:
+                # 如果字节长度不超过 1000 字节，则合并发送
+                merged_message += f"*{cleaned_subject}*\n{summary}\n[{source_name}]({url})\n\n"
+                sent_entries.add((url, subject, message_id))
+                await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
 
     if merged_message:
-        # 检查字节长度并按需拆分
+        # 发送合并后的消息
         await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=True)
 
     return []
+
 # 主题+预览
 async def process_fourth_feed(session, feed_url, sent_entries, pool, bot, table_name):
     feed_data = await fetch_feed(session, feed_url)
