@@ -1,32 +1,63 @@
 import os
-from dotenv import load_dotenv
-from telegram import Bot
+from datetime import datetime, timedelta
+import pytz
 import asyncio
+from telegram import Bot
+from dotenv import load_dotenv
 
-async def send_medicine_reminder():
-    # 加载 .env 文件中的环境变量
-    load_dotenv()
-    bot_token = os.getenv("TELEGRAM_API_KEY")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+# 加载 .env 文件
+load_dotenv()
 
-    # 检查环境变量是否正确加载
-    if not bot_token or not chat_id:
-        print("环境变量未正确加载，请检查 .env 文件")
-        return
+# 从环境变量中读取配置
+TOKEN = os.getenv('TELEGRAM_API_KEY')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-    # 创建 Telegram Bot 实例
-    bot = Bot(token=bot_token)
+# 设置上海时区
+shanghai = pytz.timezone('Asia/Shanghai')
 
-    # 消息内容
-    message = "提醒：请记得9点吃药！💊"
+# 初始化 Bot
+bot = Bot(token=TOKEN)
 
-    # 发送消息
+# 定义基准日期，例如 2024-12-06 作为起始提醒日期
+BASE_DATE = datetime(2024, 12, 6, tzinfo=shanghai)
+
+async def send_message(text):
     try:
-        print("正在发送消息...")
-        await bot.send_message(chat_id=chat_id, text=message)
-        print("消息已成功发送！")
+        await bot.send_message(chat_id=CHAT_ID, text=text)
     except Exception as e:
-        print(f"发送消息时出现错误: {e}")
+        print(f"Failed to send message: {e}")
+
+async def check_reminders():
+    now = datetime.now(shanghai)  # 获取上海时间
+
+    messages = []
+
+    # Daily medicine reminder
+    messages.append('时间到，记得吃药！')
+
+    # Every 10 days pass renewal reminder
+    days_since_base = (now - BASE_DATE).days
+    if days_since_base % 10 == 0:  # 如果今天是基准日期之后的第10天、第20天等
+        messages.append('提醒：续签通行证！')
+
+    # 年份提醒，每个日期有一个独特的提醒消息
+    annual_reminders = {
+        (1, 1): "元旦",
+        (5, 1): "从业资格证年审",
+        (12, 1): "小汽车年检"
+    }
+
+    for (month, day), message in annual_reminders.items():
+        if now.month == month and now.day == day:
+            messages.append(message)
+
+    # 每月1号提醒云闪付
+    if now.day == 1:
+        messages.append('提醒：云闪付')
+
+    # 如果有消息需要发送，合并它们并发送
+    if messages:
+        await send_message('\n\n'.join(messages))
 
 if __name__ == "__main__":
-    asyncio.run(send_medicine_reminder())
+    asyncio.run(check_reminders())

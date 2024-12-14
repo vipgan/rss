@@ -11,7 +11,6 @@ from telegram.constants import ParseMode
 from email.utils import parseaddr
 import os
 from dotenv import load_dotenv
-import json
 import hashlib
 import html
 import asyncio
@@ -40,58 +39,6 @@ def get_email_hash(msg):
     subject = clean_subject(decode_header(msg['subject']))
     body = get_email_body(msg)
     return hashlib.md5((subject + body).encode('utf-8')).hexdigest()
-
-# 加载已发送的邮件记录
-def load_sent_mail():
-    try:
-        with open('sent_mail.json', 'r', encoding='utf-8') as file:
-            return set(json.load(file))
-    except FileNotFoundError:
-        logger.info("sent_mail.json 文件未找到，将创建一个新的。")
-        with open('sent_mail.json', 'w', encoding='utf-8') as file:
-            json.dump([], file)
-        return set()
-    except json.JSONDecodeError:
-        logger.error("解析 sent_mail.json 中的 JSON 数据时出错。")
-        return set()
-
-# 批量保存已发送的邮件记录
-def save_sent_mail_to_db(mail_entries):
-    if not mail_entries:
-        return
-    existing_sent_mail = load_sent_mail()
-    for entry in mail_entries:
-        existing_sent_mail.add(entry['message_id'])
-    
-    try:
-        with open('sent_mail.json', 'w', encoding='utf-8') as file:
-            json.dump(list(existing_sent_mail), file, ensure_ascii=False, indent=4)
-        logger.info(f"保存了 {len(mail_entries)} 个邮件条目到 sent_mail.json。")
-    except Exception as e:
-        logger.error(f"保存发送邮件到 JSON 文件时出错: {e}")
-
-# 发送消息到 Telegram
-async def send_message(text):
-    try:
-        MAX_MESSAGE_LENGTH = 4096
-        messages = [text[i:i + MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
-        
-        for message_part in messages:
-            try:
-                # 发送消息并处理 Markdown 格式
-                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-                logger.info(f"消息以 Markdown 格式成功发送: {message_part[:50]}...")
-            except Exception as e:
-                logger.warning(f"以 Markdown 格式发送消息失败: {e}。切换到纯文本格式。")
-                try:
-                    # 如果 Markdown 发送失败，则尝试发送纯文本格式
-                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, disable_web_page_preview=True)
-                    logger.info(f"消息以纯文本格式成功发送: {message_part[:50]}...")
-                except Exception as e:
-                    logger.error(f"即使以纯文本格式也无法发送消息: {message_part[:50]}..., 错误: {e}")
-    
-    except Exception as e:
-        logger.error(f"发送消息到 Telegram 时出错: {e}")
 
 # 解码邮件头
 def decode_header(header):
@@ -128,9 +75,12 @@ def clean_email_body(body):
     
     # 去除多余的空白和连字符
     text = re.sub(r'-{2,}', '-', text)
-    text = re.sub(r'\*{2,}', '*', text)
-    text = re.sub(r'—{4,}', '—' * 8, text)
+    text = re.sub(r'—{4,}', '-' * 8, text)
     text = re.sub(r'<[^>]+>', '', text)
+    # 新增代码：去除文本中的 * 符号
+    text = text.replace('*', '')
+    # 新增代码：去除文本中的 _ 符号
+    text = text.replace('_', '')
 
     return text.strip()
 
@@ -154,11 +104,31 @@ def get_email_body(msg):
         
     return clean_email_body(body)
 
+# 发送消息到 Telegram
+async def send_message(text):
+    try:
+        MAX_MESSAGE_LENGTH = 4096
+        messages = [text[i:i + MAX_MESSAGE_LENGTH] for i in range(0, len(text), MAX_MESSAGE_LENGTH)]
+        
+        for message_part in messages:
+            try:
+                # 发送消息并处理 Markdown 格式
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+                logger.info(f"消息以 Markdown 格式成功发送: {message_part[:50]}...")
+            except Exception as e:
+                logger.warning(f"以 Markdown 格式发送消息失败: {e}。切换到纯文本格式。")
+                try:
+                    # 如果 Markdown 发送失败，则尝试发送纯文本格式
+                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message_part, disable_web_page_preview=True)
+                    logger.info(f"消息以纯文本格式成功发送: {message_part[:50]}...")
+                except Exception as e:
+                    logger.error(f"即使以纯文本格式也无法发送消息: {message_part[:50]}..., 错误: {e}")
+    
+    except Exception as e:
+        logger.error(f"发送消息到 Telegram 时出错: {e}")
+
 # 获取并处理未读邮件
 async def fetch_emails():
-    sent_mail = load_sent_mail()  # 已发送的邮件集合
-    new_sent_mail = []
-
     try:
         mail = imaplib.IMAP4_SSL(imap_server)
         mail.login(email_user, email_password)
@@ -175,11 +145,6 @@ async def fetch_emails():
             try:
                 _, msg_data = mail.fetch(email_id, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
-
-                email_hash = get_email_hash(msg)
-                if email_hash in sent_mail:
-                    logger.info(f"邮件哈希值 {email_hash} 已发送过。")
-                    continue
 
                 subject = clean_subject(decode_header(msg['subject']))
                 sender = decode_header(msg['from'])
@@ -212,13 +177,9 @@ async def fetch_emails():
 '''
                 await send_message(message)
 
-                new_sent_mail.append({
-                    'url': url,
-                    'subject': subject,
-                    'message_id': email_hash,
-                    'from_name': name,
-                    'from_email': email_address
-                })
+                # 将邮件标记为已读
+                mail.store(email_id, '+FLAGS', '\\Seen')
+                logger.info(f"邮件编号 {email_id} 已标记为已读")
 
             except Exception as e:
                 logger.error(f"处理邮件 ID {email_id} 时出错: {e}")
@@ -227,8 +188,6 @@ async def fetch_emails():
         logger.error(f"获取邮件时出错: {e}")
     finally:
         mail.logout()
-        if new_sent_mail:
-            save_sent_mail_to_db(new_sent_mail)
 
 if __name__ == '__main__':
     asyncio.run(fetch_emails())

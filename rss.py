@@ -17,8 +17,8 @@ load_dotenv()
 
 # 主题+翻意内容+预览
 RSS_FEEDS = [
-  #  'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
-    'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
+    'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
+  #  'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
   #  'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
   #  'https://www.cnbc.com/id/100003114/device/rss/rss.html', # CNBC
   #  'https://feeds.a.dj.com/rss/RSSWorldNews.xml', # 华尔街日报
@@ -52,6 +52,8 @@ FOURTH_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC6-ZYliTgo4aTKcLIDUw0Ag', # 音樂花園
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQFEBaHCJrHu2hzDA_69WQg', # 国漫说
     'https://blog.090227.xyz/atom.xml',
     'https://www.freedidi.com/feed',
 ]
