@@ -54,8 +54,6 @@ FOURTH_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC6-ZYliTgo4aTKcLIDUw0Ag', # 音樂花園
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCQFEBaHCJrHu2hzDA_69WQg', # 国漫说
-    'https://blog.090227.xyz/atom.xml',
-    'https://www.freedidi.com/feed',
 ]
 
 # Telegram 配置

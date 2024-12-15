@@ -16,6 +16,8 @@ load_dotenv()
 
 # RSS 源列表
 RSS_FEEDS = [
+    'https://blog.090227.xyz/atom.xml',
+    'https://www.freedidi.com/feed',
  #   'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享

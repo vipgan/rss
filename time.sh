@@ -12,5 +12,6 @@ fi
 sleep 1
 # 运行 TIME 脚本
 source ~/rss/rss_venv/bin/activate
-nohup python3 ~/rss/time.py
-deactivate
+nohup python3 ~/rss/time.py > /dev/null 2>&1 &
+# 这里的 deactivate 可能不会被执行，因为 nohup 让 time.py 在后台运行
+# deactivate
