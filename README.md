@@ -4,9 +4,9 @@ chmod +x ~/rss/rss2.sh
 chmod +x ~/rss/setup.sh  
 chmod +x ~/rss/mail.sh
 chmod +x ~/rss/time.sh
+chmod +x ~/rss/usa.sh
 # 安装
-/bin/bash ~/rss/setup.sh  
-
+/bin/bash ~/rss/setup.sh
 
 crontab -e
 # 无链接
@@ -18,10 +18,11 @@ rss2.py
 python3 -m venv rss_venv
 # 激活虚拟环境
 source rss_venv/bin/activate
-python3 time.py
+python3 usa.py
 pip install --upgrade pip
 python3 -m pip install -r requirements.txt
-
+# 生成依赖
+pip freeze > requirements.txt
 # 退出虚拟环境
 deactivate
 

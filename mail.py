@@ -69,19 +69,17 @@ def clean_email_body(body):
     soup = BeautifulSoup(body, 'html.parser')
     # 获取文本内容
     text = soup.get_text()
-    
-    # 处理连续的空行
-    text = re.sub(r'\n\s*\n+', '\n', text)
-    
     # 去除多余的空白和连字符
     text = re.sub(r'-{2,}', '-', text)
     text = re.sub(r'—{4,}', '-' * 8, text)
-    text = re.sub(r'<[^>]+>', '', text)
     # 新增代码：去除文本中的 * 符号
-    text = text.replace('*', '')
+    text = text.replace('*', '-')
     # 新增代码：去除文本中的 _ 符号
-    text = text.replace('_', '')
-
+    text = text.replace('```', '-')
+    text = text.replace('~', '-')
+    text = text.replace('_', '-')
+    # 处理连续的空行
+    text = re.sub(r'\n\s*\n+', '\n', text)
     return text.strip()
 
 # 获取邮件正文
