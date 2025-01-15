@@ -1,15 +1,14 @@
 import asyncio
 import aiohttp
-import aiomysql
 import logging
 import datetime
 import os
 import re
+import json
 from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
 from telegram.constants import ParseMode
-import urllib.parse
 
 # 加载 .env 文件
 load_dotenv()
@@ -64,20 +63,16 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCHW6W9g2TJL2_Lf7GfoI5kg', # 电影放映厅
 ]
 
+
 # Telegram 配置
 RSS_HAOYAN = os.getenv("RSS_HAOYAN")
 YOUTUBE_RSS = os.getenv("YOUTUBE_RSS")
 ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
 
-# 数据库连接配置
-DB_CONFIG = {
-    'host': os.getenv("DB_HOST"),
-    'db': os.getenv("DB_NAME"),
-    'user': os.getenv("DB_USER"),
-    'password': os.getenv("DB_PASSWORD"),
-    'minsize': 1,
-    'maxsize': 10
-}
+# 文件路径配置
+SENT_RSS_FILE = "rss.json"
+SENT_YOUTUBE_FILE = "youtube.json"
+
 
 async def fetch_feed(session, feed_url):
     try:
@@ -106,7 +101,8 @@ async def send_message(bot, chat_id, text, chunk_size=4096):
             except Exception as e:
                 logging.error(f"Failed to send fallback plain text message: {e}")
 
-async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_ids, table_name):
+
+async def process_feed(session, feed_url, sent_entries, bot, allowed_chat_ids, file_path):
     feed_data, feed_title = await fetch_feed(session, feed_url)
     if feed_data is None or feed_title is None:
         return []
@@ -132,12 +128,11 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_
             new_entries.append((url, subject, message_id))
 
             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            await save_sent_entry_to_db(
-                pool,
+            await save_sent_entry_to_file(
+                file_path,
                 url if url else current_time,
                 subject if subject else current_time,
-                message_id if message_id else current_time,
-                table_name
+                message_id if message_id else current_time
             )
             sent_entries.add((url, subject, message_id))
 
@@ -149,62 +144,54 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_
 
     return new_entries
 
-async def connect_to_db_pool():
-    try:
-        return await aiomysql.create_pool(**DB_CONFIG)
-    except Exception as e:
-        logging.error(f"Database connection error: {e}")
-        return None
 
-async def load_sent_entries_from_db(pool, table_name):
+def load_sent_entries_from_file(file_path):
     try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(f"SELECT url, subject, message_id FROM {table_name}")
-                rows = await cursor.fetchall()
-                return {(row[0], row[1], row[2]) for row in rows}
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return {(entry['url'], entry['subject'], entry['message_id']) for entry in data}
+        else:
+            return set()
     except Exception as e:
-        logging.error(f"Error loading sent entries: {e}")
+        logging.error(f"Error loading sent entries from {file_path}: {e}")
         return set()
 
-async def save_sent_entry_to_db(pool, url, subject, message_id, table_name):
+
+async def save_sent_entry_to_file(file_path, url, subject, message_id):
     try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    f"INSERT IGNORE INTO {table_name} (url, subject, message_id) VALUES (%s, %s, %s)",
-                    (url, subject, message_id)
-                )
-                await conn.commit()
+        sent_entries = load_sent_entries_from_file(file_path)
+        sent_entries.add((url, subject, message_id))
+        
+        data_to_save = []
+        for entry in sent_entries:
+            data_to_save.append({'url': entry[0], 'subject': entry[1], 'message_id': entry[2]})
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        logging.error(f"Error saving entry: {e}")
+        logging.error(f"Error saving entry to {file_path}: {e}")
+
 
 async def main():
-    pool = await connect_to_db_pool()
-    if not pool:
-        logging.error("Failed to connect to the database.")
-        return
-
-    sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
-    sent_entries_second = await load_sent_entries_from_db(pool, "sent_youtube")
+    sent_entries = load_sent_entries_from_file(SENT_RSS_FILE)
+    sent_entries_second = load_sent_entries_from_file(SENT_YOUTUBE_FILE)
 
     async with aiohttp.ClientSession() as session:
         bot = Bot(token=RSS_HAOYAN)
         second_bot = Bot(token=YOUTUBE_RSS)
 
         tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
+            process_feed(session, feed, sent_entries, bot, ALLOWED_CHAT_IDS, SENT_RSS_FILE)
             for feed in RSS_FEEDS
         ]
         tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_youtube")
+            process_feed(session, feed, sent_entries_second, second_bot, ALLOWED_CHAT_IDS, SENT_YOUTUBE_FILE)
             for feed in SECOND_RSS_FEEDS
         ]
 
         await asyncio.gather(*tasks)
 
-    pool.close()
-    await pool.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())

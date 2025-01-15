@@ -1,9 +1,9 @@
 import asyncio
 import aiohttp
+import aiomysql
 import logging
 import re
 import os
-import json
 from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
@@ -28,9 +28,9 @@ RSS_FEEDS = [
   #  'http://rss.cnn.com/rss/edition.rss', # cnn
 
 ]
-#主题+内容
+#主题+内容+预览
 THIRD_RSS_FEEDS = [ 
-  #  'https://36kr.com/feed-newsflash',
+    'https://36kr.com/feed-newsflash',
     'https://rsshub.penggan.us.kg/10jqka/realtimenews',
 
 ]
@@ -51,6 +51,7 @@ FOURTH_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke  
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC6-ZYliTgo4aTKcLIDUw0Ag', # 音樂花園
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
@@ -62,10 +63,15 @@ RSS_TWO = os.getenv("RSS_TWO")    #10086
 RSS_HAOYAN = os.getenv("RSS_HAOYAN")  #好烟   
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
-# 本地文件存储配置
-SENT_ENTRIES_FILE = "rss.json"
-SENT_ENTRIES_FILE_THIRD = "rss2.json"
-SENT_ENTRIES_FILE_FOURTH = "rss3.json"
+# 数据库连接配置
+DB_CONFIG = {
+    'host': os.getenv("DB_HOST"),
+    'db': os.getenv("DB_NAME"),
+    'user': os.getenv("DB_USER"),
+    'password': os.getenv("DB_PASSWORD"),
+    'minsize': 1,
+    'maxsize': 10
+}
 
 TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
 TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
@@ -134,7 +140,7 @@ async def auto_translate_text(text):
         logging.error(f"Translation error for text '{text}': {e}")
         return text
 # 主题+翻意内容+预览
-async def process_feed(session, feed_url, sent_entries, bot, file_path, translate=True):
+async def process_feed(session, feed_url, sent_entries, pool, bot, table_name, translate=True):
     feed_data = await fetch_feed(session, feed_url)
     if feed_data is None:
         return []
@@ -161,13 +167,12 @@ async def process_feed(session, feed_url, sent_entries, bot, file_path, translat
             await send_single_message(bot, TELEGRAM_CHAT_ID[0], message)
 
             new_entries.append((url, subject, message_id))
+            await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
             sent_entries.add((url, subject, message_id))
-            await save_sent_entries(sent_entries, file_path)
-
 
     return new_entries
 # 主题+内容 超过333字节不发送
-async def process_third_feed(session, feed_url, sent_entries, bot, file_path):
+async def process_third_feed(session, feed_url, sent_entries, pool, bot, table_name):
     feed_data = await fetch_feed(session, feed_url)
     if feed_data is None:
         return []
@@ -194,7 +199,7 @@ async def process_third_feed(session, feed_url, sent_entries, bot, file_path):
                 # 如果字节长度不超过 333 字节，则合并发送
                 merged_message += f"*{cleaned_subject}*\n{summary}\n[{source_name}]({url})\n\n"
                 sent_entries.add((url, subject, message_id))
-                await save_sent_entries(sent_entries, file_path)
+                await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
 
     if merged_message:
         # 发送合并后的消息
@@ -203,7 +208,7 @@ async def process_third_feed(session, feed_url, sent_entries, bot, file_path):
     return []
 
 # 主题+预览
-async def process_fourth_feed(session, feed_url, sent_entries, bot, file_path):
+async def process_fourth_feed(session, feed_url, sent_entries, pool, bot, table_name):
     feed_data = await fetch_feed(session, feed_url)
     if feed_data is None:
         return []
@@ -221,56 +226,74 @@ async def process_fourth_feed(session, feed_url, sent_entries, bot, file_path):
             merged_message += f"{source_name}\n*{cleaned_subject}*\n{url}\n\n"
 
             sent_entries.add((url, subject, message_id))
-            await save_sent_entries(sent_entries, file_path)
+            await save_sent_entry_to_db(pool, url, subject, message_id, table_name)
 
     if merged_message:
         await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=False)
 
     return []
 
-# 加载本地保存的已发送条目
-def load_sent_entries(file_path):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return set(tuple(item) for item in data)
-        except Exception as e:
-            logging.error(f"Error loading sent entries from {file_path}: {e}")
-            return set()
-    return set()
-
-# 保存已发送条目到本地文件
-async def save_sent_entries(sent_entries, file_path):
+async def connect_to_db_pool():
     try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(list(sent_entries), f, ensure_ascii=False, indent=4)
+        return await aiomysql.create_pool(**DB_CONFIG)
     except Exception as e:
-        logging.error(f"Error saving sent entries to {file_path}: {e}")
+        logging.error(f"Database connection error: {e}")
+        return None
+
+async def load_sent_entries_from_db(pool, table_name):
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(f"SELECT url, subject, message_id FROM {table_name}")
+                rows = await cursor.fetchall()
+                return {(row[0], row[1], row[2]) for row in rows}
+    except Exception as e:
+        logging.error(f"Error loading sent entries: {e}")
+        return set()
+
+async def save_sent_entry_to_db(pool, url, subject, message_id, table_name):
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    f"INSERT IGNORE INTO {table_name} (url, subject, message_id) VALUES (%s, %s, %s)",
+                    (url, subject, message_id)
+                )
+                await conn.commit()
+    except Exception as e:
+        logging.error(f"Error saving entry: {e}")
 
 async def main():
-    sent_entries = load_sent_entries(SENT_ENTRIES_FILE)
-    sent_entries_third = load_sent_entries(SENT_ENTRIES_FILE_THIRD)
-    sent_entries_fourth = load_sent_entries(SENT_ENTRIES_FILE_FOURTH)
+    pool = await connect_to_db_pool()
+    if not pool:
+        logging.error("Failed to connect to the database.")
+        return
 
-    async with aiohttp.ClientSession() as session:
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
-        third_bot = Bot(token=RSS_TWO)
-        fourth_bot = Bot(token=RSS_HAOYAN)
+    async with pool:
+        sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
+        sent_entries_third = await load_sent_entries_from_db(pool, "sent_rss2")
+        sent_entries_fourth = await load_sent_entries_from_db(pool, "sent_rss")
 
-        tasks = [
-            process_feed(session, feed_url, sent_entries, bot, SENT_ENTRIES_FILE, translate=True)
-            for feed_url in RSS_FEEDS
-        ] + [
-            process_third_feed(session, feed_url, sent_entries_third, third_bot, SENT_ENTRIES_FILE_THIRD)
-            for feed_url in THIRD_RSS_FEEDS
-        ] + [
-             process_fourth_feed(session, feed_url, sent_entries_fourth, fourth_bot, SENT_ENTRIES_FILE_FOURTH)
-            for feed_url in FOURTH_RSS_FEEDS
-        ]
+        async with aiohttp.ClientSession() as session:
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            third_bot = Bot(token=RSS_TWO)
+            fourth_bot = Bot(token=RSS_HAOYAN)
 
-        await asyncio.gather(*tasks)
+            tasks = [
+                process_feed(session, feed_url, sent_entries, pool, bot, "sent_rss", translate=True)
+                for feed_url in RSS_FEEDS
+            ] + [
+                process_third_feed(session, feed_url, sent_entries_third, pool, third_bot, "sent_rss2")
+                for feed_url in THIRD_RSS_FEEDS
+            ] + [
+                process_fourth_feed(session, feed_url, sent_entries_fourth, pool, fourth_bot, "sent_rss")
+                for feed_url in FOURTH_RSS_FEEDS
+            ]
 
+            await asyncio.gather(*tasks)
+
+        pool.close()
+        await pool.wait_closed()
 
 if __name__ == "__main__":
     asyncio.run(main())
