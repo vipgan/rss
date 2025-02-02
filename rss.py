@@ -4,6 +4,7 @@ import logging
 import re
 import os
 import json
+import time
 from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
@@ -17,7 +18,7 @@ load_dotenv()
 
 # 主题+翻意内容+预览
 RSS_FEEDS = [
-    'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
+ #   'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
   #  'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
   #  'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
   #  'https://www.cnbc.com/id/100003114/device/rss/rss.html', # CNBC
@@ -30,8 +31,8 @@ RSS_FEEDS = [
 ]
 #主题+内容
 THIRD_RSS_FEEDS = [ 
-  #  'https://36kr.com/feed-newsflash',
-    'https://rsshub.penggan.us.kg/10jqka/realtimenews',
+ #   'https://36kr.com/feed-newsflash',
+ #   'https://rsshub.app/10jqka/realtimenews',
 
 ]
  # 主题+预览
@@ -57,9 +58,9 @@ FOURTH_RSS_FEEDS = [
 ]
 
 # Telegram 配置
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")      #10086
-RSS_TWO = os.getenv("RSS_TWO")    #10086
-RSS_HAOYAN = os.getenv("RSS_HAOYAN")  #好烟   
+TELEGRAM_BOT_TOKEN = os.getenv("RSS_TWO")      #bbc
+RSS_TWO = os.getenv("RSS_TWO")    #36
+RSS_TOKEN = os.getenv("RSS_TOKEN")  #好烟10086
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 本地文件存储配置
@@ -70,14 +71,20 @@ SENT_ENTRIES_FILE_FOURTH = "rss3.json"
 TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
 TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
 
+MAX_ENTRIES_TO_KEEP = 5000
+TELEGRAM_DELAY = 0.5  # 发送消息后的延迟时间（秒）
+MAX_RETRIES = 3  # 最大重试次数
+RETRY_DELAY = 1  # 初始重试延迟（秒）
+
 def sanitize_markdown(text):
     # 首先去除 HTML 标签
     text = re.sub(r'<[^>]*>', '', text)
     # 然后去除 Telegram 不支持的 Markdown 符号
-    text = re.sub(r'[*_`|#\\[\\](){}<>]', '', text)
+    # 这里添加了更多的转义
+    text = re.sub(r'([*_`\[\]\(\)\~>#+\-=|{}.!])', r'\\\1', text)
     return text
 
-async def send_single_message(bot, chat_id, text, disable_web_page_preview=False):
+async def send_single_message(bot, chat_id, text, disable_web_page_preview=True, retry_count=0):
     try:
         # Telegram 最大消息字节数限制：4096字节
         MAX_MESSAGE_LENGTH = 4096
@@ -91,6 +98,7 @@ async def send_single_message(bot, chat_id, text, disable_web_page_preview=False
                     parse_mode='Markdown', 
                     disable_web_page_preview=disable_web_page_preview
                 )
+                await asyncio.sleep(TELEGRAM_DELAY) # 添加延迟
         else:
             # 如果没有超长，直接发送
             await bot.send_message(
@@ -99,20 +107,38 @@ async def send_single_message(bot, chat_id, text, disable_web_page_preview=False
                 parse_mode='Markdown', 
                 disable_web_page_preview=disable_web_page_preview
             )
+            await asyncio.sleep(TELEGRAM_DELAY) # 添加延迟
     except Exception as e:
-        logging.error(f"Failed to send message: {e}")
+        logging.error(f"Failed to send message (attempt {retry_count+1}): {e}, message: {text}")
+        if retry_count < MAX_RETRIES:
+            delay = RETRY_DELAY * (2 ** retry_count)
+            logging.info(f"Retrying in {delay} seconds...")
+            await asyncio.sleep(delay)
+            return await send_single_message(bot, chat_id, text, disable_web_page_preview, retry_count + 1)
+        else:
+             logging.error(f"Max retries exceeded for message: {text}")
 
-async def fetch_feed(session, feed_url):
+async def fetch_feed(session, feed_url, retry_count=0):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36'
     }
     try:
-        async with session.get(feed_url, headers=headers, timeout=40) as response:
+        async with session.get(feed_url, headers=headers, timeout=60) as response: # 增加超时时间
             response.raise_for_status()
             content = await response.read()
             return parse(content)
+    except aiohttp.ClientError as e:
+        logging.error(f"Error fetching {feed_url} (attempt {retry_count+1}): {e}")
+        if retry_count < MAX_RETRIES:
+            delay = RETRY_DELAY * (2 ** retry_count)
+            logging.info(f"Retrying in {delay} seconds...")
+            await asyncio.sleep(delay)
+            return await fetch_feed(session, feed_url, retry_count + 1)
+        else:
+             logging.error(f"Max retries exceeded for feed: {feed_url}")
+             return None
     except Exception as e:
-        logging.error(f"Error fetching {feed_url}: {e}")
+        logging.error(f"Error fetching {feed_url} (attempt {retry_count+1}): {e}")
         return None
 
 async def auto_translate_text(text):
@@ -157,8 +183,17 @@ async def process_feed(session, feed_url, sent_entries, bot, file_path, translat
                 translated_summary = summary
 
             cleaned_subject = sanitize_markdown(translated_subject)
-            message = f"*{cleaned_subject}*\n{translated_summary}\n[{source_name}]({url})"
-            await send_single_message(bot, TELEGRAM_CHAT_ID[0], message)
+            cleaned_summary = sanitize_markdown(translated_summary)
+            message = f"*{cleaned_subject}*\n{cleaned_summary}\n[{source_name}]({url})"
+
+            if len(message.encode('utf-8')) > 4096:
+                logging.warning(f"Message too long, skipping: {message}")
+                continue
+
+            try:
+                await send_single_message(bot, TELEGRAM_CHAT_ID[0], message)
+            except Exception as e:
+                logging.error(f"Error sending message for subject '{cleaned_subject}': {e}")
 
             new_entries.append((url, subject, message_id))
             sent_entries.add((url, subject, message_id))
@@ -198,7 +233,11 @@ async def process_third_feed(session, feed_url, sent_entries, bot, file_path):
 
     if merged_message:
         # 发送合并后的消息
-        await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=True)
+        try:
+            await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=True)
+        except Exception as e:
+            logging.error(f"Error sending merged message: {e}")
+
 
     return []
 
@@ -224,7 +263,11 @@ async def process_fourth_feed(session, feed_url, sent_entries, bot, file_path):
             await save_sent_entries(sent_entries, file_path)
 
     if merged_message:
-        await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=False)
+        try:
+            await send_single_message(bot, TELEGRAM_CHAT_ID[0], merged_message, disable_web_page_preview=False)
+        except Exception as e:
+            logging.error(f"Error sending merged message: {e}")
+
 
     return []
 
@@ -234,7 +277,8 @@ def load_sent_entries(file_path):
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return set(tuple(item) for item in data)
+                # 将加载的数据转换为集合，并限制大小
+                return set(tuple(item) for item in data[-MAX_ENTRIES_TO_KEEP:])
         except Exception as e:
             logging.error(f"Error loading sent entries from {file_path}: {e}")
             return set()
@@ -243,8 +287,10 @@ def load_sent_entries(file_path):
 # 保存已发送条目到本地文件
 async def save_sent_entries(sent_entries, file_path):
     try:
+        # 限制保存的条目数量
+        entries_to_save = list(sent_entries)[-MAX_ENTRIES_TO_KEEP:]
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(list(sent_entries), f, ensure_ascii=False, indent=4)
+            json.dump(entries_to_save, f, ensure_ascii=False, indent=4)
     except Exception as e:
         logging.error(f"Error saving sent entries to {file_path}: {e}")
 
@@ -253,10 +299,11 @@ async def main():
     sent_entries_third = load_sent_entries(SENT_ENTRIES_FILE_THIRD)
     sent_entries_fourth = load_sent_entries(SENT_ENTRIES_FILE_FOURTH)
 
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(limit=200)  # 增加连接池大小
+    async with aiohttp.ClientSession(connector=connector) as session:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         third_bot = Bot(token=RSS_TWO)
-        fourth_bot = Bot(token=RSS_HAOYAN)
+        fourth_bot = Bot(token=RSS_TOKEN)
 
         tasks = [
             process_feed(session, feed_url, sent_entries, bot, SENT_ENTRIES_FILE, translate=True)
@@ -273,4 +320,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     asyncio.run(main())

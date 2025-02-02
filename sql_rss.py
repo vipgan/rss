@@ -31,7 +31,7 @@ RSS_FEEDS = [
 #主题+内容+预览
 THIRD_RSS_FEEDS = [ 
     'https://36kr.com/feed-newsflash',
-    'https://rsshub.penggan.us.kg/10jqka/realtimenews',
+    'https://rsshub.app/10jqka/realtimenews',
 
 ]
  # 主题+预览
