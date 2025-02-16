@@ -3,216 +3,247 @@ import aiohttp
 import logging
 import re
 import os
+import feedparser
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from feedparser import parse
 from telegram import Bot
 from tencentcloud.common import credential
 from tencentcloud.common.profile.client_profile import ClientProfile
 from tencentcloud.common.profile.http_profile import HttpProfile
 from tencentcloud.tmt.v20180321 import tmt_client, models
 
-# 加载.env 文件
+# 配置加载
 load_dotenv()
 
-# 主题+翻意内容+预览
+# 异步安全配置
+MAX_CONCURRENT_REQUESTS = 5
+SENT_ENTRIES_FILE = "rss.json"
+RETENTION_DAYS = 15  # 15天历史记录保留
+MAX_HISTORY_ENTRIES = 1000  # 内存最大保留1500条
+REQUEST_TIMEOUT = 30
+TELEGRAM_DELAY = 0.3
+
+# RSS源配置
 RSS_FEEDS = [
-    'https://feeds.bbci.co.uk/news/world/rss.xml',  # bbc
+     'https://feeds.bbci.co.uk/news/world/rss.xml',  # bbc
     # 'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
     # 'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
     # 'https://www.cnbc.com/id/100003114/device/rss/rss.html',  # CNBC
-    # 'https://feeds.a.dj.com/rss/RSSWorldNews.xml',  # 华尔街日报
+     'https://feeds.a.dj.com/rss/RSSWorldNews.xml',  # 华尔街日报
     # 'https://www.aljazeera.com/xml/rss/all.xml',  # 半岛电视台
     # 'https://www.ft.com/?format=rss',  # 金融时报
     # 'http://rss.cnn.com/rss/edition.rss',  # cnn
 ]
 
-# Telegram 配置
-TELEGRAM_BOT_TOKEN = os.getenv("RSS_TWO")  # bbc
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
-
-# 本地文件存储配置
-SENT_ENTRIES_FILE = "rss.json"
-
+# 环境变量
+TELEGRAM_BOT_TOKEN = os.getenv("RSS_TWO")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
 TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
 
-MAX_ENTRIES_TO_KEEP = 900    #本地保存条目
-TELEGRAM_DELAY = 0.5  # 发送消息后的延迟时间（秒）
-MAX_RETRIES = 3  # 最大重试次数
-RETRY_DELAY = 1  # 初始重试延迟（秒）
+# 日志配置
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('rss_bot.log'),
+        logging.StreamHandler()
+    ]
+)
 
+class AsyncRSSBot:
+    def __init__(self):
+        self.sent_entries = []  # 存储格式：{'id': str, 'timestamp': float}
+        self.lock = asyncio.Lock()
+        self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        self.translate_client = None
+        self.session = None
 
-def sanitize_markdown(text):
-    # 首先去除 HTML 标签
-    text = re.sub(r'<[^>]*>', '', text)
-    # 然后去除 Telegram 不支持的 Markdown 符号
-    text = re.sub(r'[*_`|#\\[\\](){}<>~+\-=!@%^&]', '', text)
-    return text
+    async def initialize(self):
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT))
+        await self.load_history()
+        self.init_translate_client()
 
-
-async def send_single_message(bot, chat_id, text, disable_web_page_preview=False, retry_count=0):
-    try:
-        # Telegram 最大消息字节数限制：4096字节
-        MAX_MESSAGE_LENGTH = 4096
-        # 计算消息的字节数
-        if len(text.encode('utf-8')) > MAX_MESSAGE_LENGTH:
-            # 如果超长，拆分为多个消息
-            for i in range(0, len(text), MAX_MESSAGE_LENGTH):
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=text[i:i + MAX_MESSAGE_LENGTH],
-                    parse_mode='Markdown',
-                    disable_web_page_preview=disable_web_page_preview
-                )
-                await asyncio.sleep(TELEGRAM_DELAY)  # 添加延迟
-        else:
-            # 如果没有超长，直接发送
-            await bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode='Markdown',
-                disable_web_page_preview=disable_web_page_preview
-            )
-            await asyncio.sleep(TELEGRAM_DELAY)  # 添加延迟
-    except Exception as e:
-        logging.error(f"Failed to send message (attempt {retry_count + 1}): {e}")
-        if retry_count < MAX_RETRIES:
-            delay = RETRY_DELAY * (2 ** retry_count)
-            logging.info(f"Retrying in {delay} seconds...")
-            await asyncio.sleep(delay)
-            return await send_single_message(bot, chat_id, text, disable_web_page_preview, retry_count + 1)
-        else:
-            logging.error(f"Max retries exceeded for message: {text}")
-
-
-async def fetch_feed(session, feed_url, retry_count=0):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36'
-    }
-    try:
-        async with session.get(feed_url, headers=headers, timeout=60) as response:  # 增加超时时间
-            response.raise_for_status()
-            content = await response.read()
-            return parse(content)
-    except aiohttp.ClientError as e:
-        logging.error(f"Error fetching {feed_url} (attempt {retry_count + 1}): {e}")
-        if retry_count < MAX_RETRIES:
-            delay = RETRY_DELAY * (2 ** retry_count)
-            logging.info(f"Retrying in {delay} seconds...")
-            await asyncio.sleep(delay)
-            return await fetch_feed(session, feed_url, retry_count + 1)
-        else:
-            logging.error(f"Max retries exceeded for feed: {feed_url}")
-            return None
-    except Exception as e:
-        logging.error(f"Error fetching {feed_url} (attempt {retry_count + 1}): {e}")
-        return None
-
-
-async def auto_translate_text(text):
-    try:
+    def init_translate_client(self):
         cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
-        httpProfile = HttpProfile(endpoint="tmt.tencentcloudapi.com")
-        clientProfile = ClientProfile(httpProfile=httpProfile)
-        client = tmt_client.TmtClient(cred, "na-siliconvalley", clientProfile)
+        http_profile = HttpProfile(endpoint="tmt.tencentcloudapi.com")
+        client_profile = ClientProfile(httpProfile=http_profile)
+        self.translate_client = tmt_client.TmtClient(cred, "na-siliconvalley", client_profile)
 
-        req = models.TextTranslateRequest()
-        req.SourceText = text
-        req.Source = "auto"
-        req.Target = "zh"
-        req.ProjectId = 0
+    async def cleanup(self):
+        await self.session.close()
+        await self.save_history()
 
-        resp = client.TextTranslate(req)
-        return resp.TargetText
-    except Exception as e:
-        logging.error(f"Translation error for text '{text}': {e}")
-        return text
-
-
-# 主题+翻意内容+预览
-async def process_feed(session, feed_url, sent_entries, bot, file_path, translate=True):
-    feed_data = await fetch_feed(session, feed_url)
-    if feed_data is None:
-        return []
-
-    source_name = feed_data.feed.get('title', feed_url)  # 动态获取源名称
-    new_entries = []
-
-    for entry in feed_data.entries:
-        subject = entry.title or "*无标题*"
-        url = entry.link
-        summary = getattr(entry, 'summary', "暂无简介")
-
-        if url in sent_entries:
-            continue  # 如果链接已存在，跳过当前条目
-
-        if translate:
-            translated_subject = await auto_translate_text(subject)
-            translated_summary = await auto_translate_text(summary)
-        else:
-            translated_subject = subject
-            translated_summary = summary
-
-        cleaned_subject = sanitize_markdown(translated_subject)
-        message = f"*{cleaned_subject}*\n{translated_summary}\n[{source_name}]({url})"
+    async def load_history(self):
+        """加载历史记录并执行数据清理"""
         try:
-            await send_single_message(bot, TELEGRAM_CHAT_ID[0], message)
+            if os.path.exists(SENT_ENTRIES_FILE):
+                with open(SENT_ENTRIES_FILE, 'r') as f:
+                    entries = json.load(f)
+                    
+                    # 数据格式迁移（兼容旧版本）
+                    converted = []
+                    for entry in entries:
+                        if isinstance(entry, str):
+                            # 旧格式转换：添加当前时间戳（会被后续过滤）
+                            converted.append({'id': entry, 'timestamp': datetime.now().timestamp()})
+                        else:
+                            converted.append(entry)
+                    
+                    # 执行双重过滤
+                    cutoff = datetime.now().timestamp() - RETENTION_DAYS * 86400
+                    valid_entries = [
+                        e for e in converted
+                        if e['timestamp'] >= cutoff
+                    ][-MAX_HISTORY_ENTRIES:]  # 先时间过滤，再数量限制
+                    
+                    async with self.lock:
+                        self.sent_entries = valid_entries
+                    
+                    logging.info(f"Loaded {len(valid_entries)} entries (last {RETENTION_DAYS} days & max {MAX_HISTORY_ENTRIES} items)")
         except Exception as e:
-            logging.error(f"Error sending message for subject '{cleaned_subject}': {e}")
+            logging.error(f"Error loading history: {str(e)}")
 
-        new_entries.append((url, subject))
-        sent_entries.add(url)
-        await save_sent_entries(sent_entries, file_path)
-
-    return new_entries
-
-
-# 加载本地保存的已发送条目
-def load_sent_entries(file_path):
-    if os.path.exists(file_path):
+    async def save_history(self):
+        """保存历史记录并执行清理"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # 将加载的数据转换为集合，并限制大小
-                return set(data[-MAX_ENTRIES_TO_KEEP:])
+            async with self.lock:
+                # 双重清理策略
+                cutoff = datetime.now().timestamp() - RETENTION_DAYS * 86400
+                valid_entries = [
+                    e for e in self.sent_entries
+                    if e['timestamp'] >= cutoff
+                ][-MAX_HISTORY_ENTRIES:]  # 先按时间过滤，再按数量限制
+                
+                with open(SENT_ENTRIES_FILE, 'w') as f:
+                    json.dump(valid_entries, f, indent=2)
+                
+                # 更新内存中的记录
+                self.sent_entries = valid_entries
+            
+            logging.info(f"Saved {len(valid_entries)} entries (last {RETENTION_DAYS} days & max {MAX_HISTORY_ENTRIES} items)")
         except Exception as e:
-            logging.error(f"Error loading sent entries from {file_path}: {e}")
-            return set()
-    return set()
+            logging.error(f"Error saving history: {str(e)}")
 
+    def sanitize_markdown(self, text):
+        text = re.sub(r'<[^>]*>', '', text)
+        return re.sub(r'([*_`|#\\[\\](){}<>~+\-=!@%^&])', r'\\\1', text)
 
-# 保存已发送条目到本地文件
-async def save_sent_entries(sent_entries, file_path):
-    try:
-        # 限制保存的条目数量
-        entries_to_save = list(sent_entries)[-MAX_ENTRIES_TO_KEEP:]
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(
-                entries_to_save,  # 将要序列化的数据作为第一个参数
-                f,               # 文件对象作为第二个参数
-                ensure_ascii=False,
-                indent=4
-            )
-    except Exception as e:
-        logging.error(f"Error saving sent entries to {file_path}: {e}")
+    async def translate_text(self, text):
+        try:
+            req = models.TextTranslateRequest()
+            req.SourceText = text
+            req.Source = "auto"
+            req.Target = "zh"
+            req.ProjectId = 0
+            resp = self.translate_client.TextTranslate(req)
+            return resp.TargetText
+        except Exception as e:
+            logging.error(f"Translation error: {str(e)}")
+            return text
 
+    async def safe_send_message(self, chat_id, message):
+        max_length = 4096
+        chunks = [message[i:i+max_length] for i in range(0, len(message), max_length)]
+        
+        for chunk in chunks:
+            for attempt in range(3):
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=chunk,
+                        parse_mode='Markdown',
+                        disable_web_page_preview=True
+                    )
+                    await asyncio.sleep(TELEGRAM_DELAY)
+                    break
+                except Exception as e:
+                    logging.warning(f"Attempt {attempt+1} failed: {str(e)}")
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(2 ** attempt)
 
-async def main():
-    sent_entries = load_sent_entries(SENT_ENTRIES_FILE)
+    async def process_entry(self, entry, source_name):
+        entry_id = entry.get('link') or entry.get('id')
+        if not entry_id:
+            logging.warning("Entry missing ID, skipping")
+            return False
 
-    connector = aiohttp.TCPConnector(limit=200)  # 增加连接池大小
-    async with aiohttp.ClientSession(connector=connector) as session:
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        # 检查是否已存在
+        async with self.lock:
+            existing_ids = {e['id'] for e in self.sent_entries}
+            if entry_id in existing_ids:
+                return False
 
-        tasks = [
-            process_feed(session, feed_url, sent_entries, bot, SENT_ENTRIES_FILE, translate=True)
-            for feed_url in RSS_FEEDS
-        ]
+        title = self.sanitize_markdown(entry.get('title', 'Untitled'))
+        summary = self.sanitize_markdown(entry.get('summary', 'No summary'))
+        
+        # 并行翻译
+        translated_title, translated_summary = await asyncio.gather(
+            self.translate_text(title),
+            self.translate_text(summary)
+        )
+        
+        message = f"*{translated_title}*\n{translated_summary}\n[{source_name}]({entry_id})"
+        
+        try:
+            await self.safe_send_message(TELEGRAM_CHAT_ID, message)
+            async with self.lock:
+                # 添加新条目并执行内存清理
+                self.sent_entries.append({
+                    'id': entry_id,
+                    'timestamp': datetime.now().timestamp()
+                })
+                # 实时维护内存数据
+                cutoff = datetime.now().timestamp() - RETENTION_DAYS * 86400
+                self.sent_entries = [
+                    e for e in self.sent_entries
+                    if e['timestamp'] >= cutoff
+                ][-MAX_HISTORY_ENTRIES:]
+            return True
+        except Exception as e:
+            logging.error(f"Failed to send message: {str(e)}")
+            return False
 
-        await asyncio.gather(*tasks)
+    async def fetch_feed(self, feed_url):
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        try:
+            async with self.session.get(feed_url, headers=headers) as response:
+                content = await response.text()
+                return feedparser.parse(content)
+        except Exception as e:
+            logging.error(f"Failed to fetch {feed_url}: {str(e)}")
+            return None
 
+    async def process_feed(self, feed_url):
+        feed = await self.fetch_feed(feed_url)
+        if not feed or not feed.entries:
+            return 0
+        
+        source_name = feed.feed.get('title', feed_url)
+        count = 0
+        
+        for entry in reversed(feed.entries):
+            if await self.process_entry(entry, source_name):
+                count += 1
+        return count
+
+    async def run(self):
+        await self.initialize()
+        try:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+            
+            async def limited_task(feed_url):
+                async with semaphore:
+                    return await self.process_feed(feed_url)
+            
+            tasks = [limited_task(url) for url in RSS_FEEDS]
+            results = await asyncio.gather(*tasks)
+            logging.info(f"Total {sum(results)} new messages sent")
+        finally:
+            await self.cleanup()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    bot = AsyncRSSBot()
+    asyncio.run(bot.run())

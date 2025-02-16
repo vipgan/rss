@@ -1,16 +1,26 @@
 #!/bin/bash
 
-# 检查 rss2.py 是否在运行
-if pgrep -f "rss2.py" > /dev/null; then
-    echo "rss2.py is running. Stopping it..."
-    # 停止 rss2.py 进程
-    pkill -f "rss2.py"
+# 设置环境变量 (如果需要)
+# export VARIABLE_NAME="value"
+
+# 进入脚本所在目录
+cd /root/rss
+
+# 激活虚拟环境
+source rss_venv/bin/activate
+
+# 定义日志文件路径
+LOG_FILE="rss_error.log"
+
+# 执行 Python 脚本，并将标准错误输出重定向到日志文件
+python3 rss2.py 2>> "$LOG_FILE"
+
+# 检查 Python 脚本的退出状态码
+if [ $? -ne 0 ]; then
+  echo "$(date) - 脚本执行失败，请查看错误日志: $LOG_FILE" >> rss.log
 else
-    echo "rss2.py is not running."
+  echo "$(date) - 脚本执行完毕" >> rss.log
 fi
-# 等待1秒
-sleep 1
-# 运行 RSS2 脚本
-source ~/rss/rss_venv/bin/activate
-nohup python3 ~/rss/rss2.py > /dev/null 2>&1 &
-# deactivate
+
+# 退出虚拟环境 (可选)
+deactivate

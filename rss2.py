@@ -1,51 +1,62 @@
 import asyncio
 import aiohttp
-import aiomysql
 import logging
-import datetime
 import os
 import re
+import json
+import html
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
 from telegram.constants import ParseMode
-import urllib.parse
 
-# 加载 .env 文件
+# 加载环境变量
 load_dotenv()
 
-# RSS 源列表
+# 配置参数
+CONNECTION_POOL_SIZE = 20
+REQUEST_TIMEOUT = 30
+SEND_INTERVAL = 0.7
+MAX_CONCURRENT_TASKS = 10
+MAX_ENTRIES_PER_FEED = 20
+HOURS_LIMIT = 24
+STORAGE_FILE = "youtube.json"
+
 RSS_FEEDS = [
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休 
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常 
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士 
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通 
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师 
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn  
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk  
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享  
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke  
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
 ]
 
 SECOND_RSS_FEEDS = [
-  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', # 苏恒观察
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', # 苏恒观察
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCXkOTZJ743JgVhJWmNV8F3Q', # 寒國人
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC2r2LPbOUssIa02EbOIm7NA', # 星球熱點
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCF-Q1Zwyn9681F7du8DMAWg', # 謝宗桓-老謝來了
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCF-Q1Zwyn9681F7du8DMAWg', # 謝宗桓-老謝來了
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCOSmkVK2xsihzKXQgiXPS4w', # 历史哥
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCSYBgX9pWGiUAcBxjnj6JCQ', # 郭正亮頻道
- #   'https://www.youtube.com/feeds/videos.xml?channel_id=UCNiJNzSkfumLB7bYtXcIEmg', # 真的很博通
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCNiJNzSkfumLB7bYtXcIEmg', # 真的很博通
  #   'https://www.youtube.com/feeds/videos.xml?channel_id=UCG_gH6S-2ZUOtEw27uIS_QA', # 7Car小七車觀點
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCJ5rBA0z4WFGtUTS83sAb_A', # POP Radio聯播網
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog', # Asmongold TV 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCN0eCImZY6_OiJbo8cy5bLw', # 屈機TV 
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCb3TZ4SD_Ys3j4z0-8o6auA', # BBC News 中文
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCiwt1aanVMoPYUt_CQYCPQg', # 全球大視野
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC000Jn3HGeQSwBuX_cLDK8Q', # 我是柳傑克
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCQFEBaHCJrHu2hzDA_69WQg', # 国漫说
@@ -63,147 +74,143 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCHW6W9g2TJL2_Lf7GfoI5kg', # 电影放映厅
 ]
 
-# Telegram 配置
-RSS_HAOYAN = os.getenv("RSS_HAOYAN")
-YOUTUBE_RSS = os.getenv("YOUTUBE_RSS")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+def clean_text(text):
+    """清理文本并转义HTML字符"""
+    text = re.sub(r'<\/?b>', '', text)  # 移除残留HTML标签
+    text = re.sub(r'[^\w\s\u4e00-\u9fa5.,!?;:"\'()\-]+', '', text)
+    return html.escape(text)  # 转义HTML特殊字符
 
-# 数据库连接配置
-DB_CONFIG = {
-    'host': os.getenv("DB_HOST"),
-    'db': os.getenv("DB_NAME"),
-    'user': os.getenv("DB_USER"),
-    'password': os.getenv("DB_PASSWORD"),
-    'minsize': 1,
-    'maxsize': 10
-}
+async def create_session():
+    return aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(
+            limit=CONNECTION_POOL_SIZE,
+            limit_per_host=5,
+            ssl=False
+        ),
+        timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+    )
 
 async def fetch_feed(session, feed_url):
     try:
-        async with session.get(feed_url, timeout=88) as response:
+        async with session.get(feed_url) as response:
             response.raise_for_status()
-            content = await response.read()
-            parsed_feed = parse(content)
-            feed_title = parsed_feed.feed.get('title', '未命名来源')  # 获取 RSS 名称
-            return parsed_feed, feed_title
+            return parse(await response.read())
     except Exception as e:
-        logging.error(f"Error fetching {feed_url}: {e}")
-        return None, None
-
-
-async def send_message(bot, chat_id, text, chunk_size=4096):
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i + chunk_size]
-        try:
-            # 使用 HTML 格式推送消息
-            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML)
-        except Exception as e:
-            logging.error(f"Failed to send HTML message: {e}. Retrying with plain text.")
-            try:
-                # 回退到原文推送
-                await bot.send_message(chat_id=chat_id, text=chunk)
-            except Exception as e:
-                logging.error(f"Failed to send fallback plain text message: {e}")
-
-async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_ids, table_name):
-    feed_data, feed_title = await fetch_feed(session, feed_url)
-    if feed_data is None or feed_title is None:
-        return []
-
-    new_entries = []
-    messages = []
-
-    for entry in feed_data.entries:
-        subject = entry.title if entry.title else None
-        url = entry.link if entry.link else None
-
-        if subject:
-            # 添加来源名称到消息中并保留标点符号
-            subject = f"{subject}"
-            # 修改正则表达式以保留标点符号
-            subject = re.sub(r'[^\w\s\u4e00-\u9fa5.,!?;:"\'()\-]+', '', subject)
-
-        message_id = f"{subject}_{url}" if subject and url else None
-
-        if (url, subject, message_id) not in sent_entries:
-            message = f"{feed_title}\n<b>{subject}</b>\n{url}"
-            messages.append(message)
-            new_entries.append((url, subject, message_id))
-
-            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            await save_sent_entry_to_db(
-                pool,
-                url if url else current_time,
-                subject if subject else current_time,
-                message_id if message_id else current_time,
-                table_name
-            )
-            sent_entries.add((url, subject, message_id))
-
-    if messages:
-        combined_message = "\n\n".join(messages)  # 使用换行符拼接消息
-        for chat_id in allowed_chat_ids:
-            await send_message(bot, chat_id, combined_message)
-        await asyncio.sleep(6)
-
-    return new_entries
-
-async def connect_to_db_pool():
-    try:
-        return await aiomysql.create_pool(**DB_CONFIG)
-    except Exception as e:
-        logging.error(f"Database connection error: {e}")
+        logging.error(f"抓取失败 {feed_url}: {e}")
         return None
 
-async def load_sent_entries_from_db(pool, table_name):
+async def send_message(bot, chat_id, text):
     try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(f"SELECT url, subject, message_id FROM {table_name}")
-                rows = await cursor.fetchall()
-                return {(row[0], row[1], row[2]) for row in rows}
+        await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=False
+        )
+        await asyncio.sleep(SEND_INTERVAL)
     except Exception as e:
-        logging.error(f"Error loading sent entries: {e}")
-        return set()
+        logging.error(f"消息发送失败: {e}")
+        for retry in range(3):
+            try:
+                await asyncio.sleep(2 ** retry)
+                await bot.send_message(chat_id=chat_id, text=text)
+                return
+            except Exception:
+                continue
 
-async def save_sent_entry_to_db(pool, url, subject, message_id, table_name):
+def within_time_limit(entry):
+    time_fields = ['published_parsed', 'updated_parsed', 'created_parsed']
+    for field in time_fields:
+        if hasattr(entry, field):
+            time_tuple = getattr(entry, field)
+            if time_tuple:
+                entry_time = datetime(*time_tuple[:6], tzinfo=timezone.utc)
+                time_diff = datetime.now(timezone.utc) - entry_time
+                return time_diff <= timedelta(hours=HOURS_LIMIT)
+    return False
+
+async def process_feed(session, feed_url, bot, chat_ids, sent_urls):
     try:
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    f"INSERT IGNORE INTO {table_name} (url, subject, message_id) VALUES (%s, %s, %s)",
-                    (url, subject, message_id)
-                )
-                await conn.commit()
+        feed_data = await fetch_feed(session, feed_url)
+        if not feed_data or not hasattr(feed_data, 'feed'):
+            return
+
+        raw_feed_title = feed_data.feed.get('title', '未命名来源')
+        feed_title = clean_text(raw_feed_title)  # 清理频道名称
+        new_entries = []
+        processed_count = 0
+
+        for entry in feed_data.entries:
+            if processed_count >= MAX_ENTRIES_PER_FEED:
+                break
+
+            if not within_time_limit(entry):
+                continue
+
+            url = entry.get('link', '')
+            if url and url not in sent_urls:
+                raw_title = entry.get('title', '无标题')
+                clean_title = clean_text(raw_title)  # 清理并转义标题
+                
+                # 使用HTML加粗标签
+                new_entries.append(f"<b>{clean_title}</b>\n{url}")
+                sent_urls.add(url)
+                processed_count += 1
+
+        if new_entries:
+            message = f"{feed_title}\n\n" + "\n\n".join(new_entries)
+            for chat_id in chat_ids:
+                await send_message(bot, chat_id, message)
+            await save_sent_urls(sent_urls)
+
     except Exception as e:
-        logging.error(f"Error saving entry: {e}")
+        logging.error(f"处理源失败 {feed_url}: {e}")
 
 async def main():
-    pool = await connect_to_db_pool()
-    if not pool:
-        logging.error("Failed to connect to the database.")
-        return
+    session = await create_session()
+    try:
+        bot = Bot(os.getenv("RSS_TOKEN"))
+        second_bot = Bot(os.getenv("YOUTUBE_RSS"))
+        chat_ids = [int(cid) for cid in os.getenv("ALLOWED_CHAT_IDS", "").split(",") if cid]
+        sent_urls = await load_sent_urls()
 
-    sent_entries = await load_sent_entries_from_db(pool, "sent_rss")
-    sent_entries_second = await load_sent_entries_from_db(pool, "sent_youtube")
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        
+        async def limited_task(feed_url, target_bot):
+            async with semaphore:
+                await process_feed(session, feed_url, target_bot, chat_ids, sent_urls)
 
-    async with aiohttp.ClientSession() as session:
-        bot = Bot(token=RSS_HAOYAN)
-        second_bot = Bot(token=YOUTUBE_RSS)
-
-        tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
-            for feed in RSS_FEEDS
-        ]
-        tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_youtube")
-            for feed in SECOND_RSS_FEEDS
-        ]
+        tasks = []
+        for feed_url in RSS_FEEDS:
+            tasks.append(limited_task(feed_url, bot))
+        for feed_url in SECOND_RSS_FEEDS:
+            tasks.append(limited_task(feed_url, second_bot))
 
         await asyncio.gather(*tasks)
+        await save_sent_urls(sent_urls)
+        
+    finally:
+        await session.close()
 
-    pool.close()
-    await pool.wait_closed()
+async def load_sent_urls():
+    try:
+        if os.path.exists(STORAGE_FILE):
+            with open(STORAGE_FILE, 'r') as f:
+                return set(json.load(f))
+    except Exception as e:
+        logging.error(f"加载失败 {STORAGE_FILE}: {e}")
+    return set()
+
+async def save_sent_urls(urls):
+    try:
+        with open(STORAGE_FILE, 'w') as f:
+            json.dump(list(urls), f)
+    except Exception as e:
+        logging.error(f"保存失败 {STORAGE_FILE}: {e}")
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
     asyncio.run(main())
