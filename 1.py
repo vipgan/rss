@@ -4,9 +4,7 @@ import datetime
 import asyncio
 from telegram import Bot
 
-# Telegram Bot 配置
-TELEGRAM_API_TOKEN = '7422217982:AAGcyh0Do-RzggL8i61BksdVZModB6wfHzc'
-CHAT_ID = '7071127210'
+# Telegram Bot 配'
 
 # 转义MarkdownV2中的特殊字符
 def escape_markdown_v2(text):
