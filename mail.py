@@ -19,7 +19,7 @@ EMAIL_ADDRESS = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_API_KEY")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-MAX_MESSAGE_LENGTH = 3800
+MAX_MESSAGE_LENGTH = 3900  # 保留安全余量
 DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
 # 日志配置
@@ -66,36 +66,24 @@ class ContentProcessor:
     @staticmethod
     def normalize_newlines(text):
         """统一换行符并合并空行"""
-        # 替换所有换行符为\n
         text = text.replace('\r\n', '\n').replace('\r', '\n')
-        # 合并3个以上换行为2个
         return re.sub(r'\n{3,}', '\n\n', text)
 
     @staticmethod
     def clean_text(text):
         """终极文本清洗"""
-        # 去除所有 | 符号
         text = text.replace('|', '')
-        
-        # 清理特殊字符
         text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
-        
-        # 合并连续空行（先标准化换行）
         text = ContentProcessor.normalize_newlines(text)
-        
-        # 去除行首尾空白
         text = '\n'.join(line.strip() for line in text.split('\n'))
-        
-        # 清理残留HTML标签
         text = re.sub(r'<[^>]+>', '', text)
-        
         return text.strip()
 
     @staticmethod
     def extract_urls(html):
         """智能链接过滤"""
         url_pattern = re.compile(
-            r'(https?://[^\s>"\'{}|\\^`]+)',  # 更严格的匹配
+            r'(https?://[^\s>"\'{}|\\^`]+)',
             re.IGNORECASE
         )
         urls = []
@@ -126,8 +114,8 @@ class ContentProcessor:
             html = html_bytes.decode(encoding, errors='replace')
             
             converter = html2text.HTML2Text()
-            converter.body_width = 0          # 禁用自动换行
-            converter.ignore_links = True     # 由extract_urls单独处理
+            converter.body_width = 0
+            converter.ignore_links = True
             converter.ignore_images = True
             converter.ignore_emphasis = True
             
@@ -140,7 +128,6 @@ class ContentProcessor:
             if urls:
                 final_text += "\n\n相关链接：\n" + "\n".join(urls)
                 
-            # 最终空行处理
             return ContentProcessor.normalize_newlines(final_text)
             
         except Exception as e:
@@ -153,14 +140,12 @@ class EmailHandler:
         """统一内容获取"""
         try:
             content = ""
-            # 优先处理HTML
             for part in msg.walk():
                 if part.get_content_type() == 'text/html':
                     html_bytes = part.get_payload(decode=True)
                     content = ContentProcessor.convert_html_to_text(html_bytes)
                     break
                     
-            # 次选纯文本
             if not content:
                 for part in msg.walk():
                     if part.get_content_type() == 'text/plain':
@@ -170,13 +155,11 @@ class EmailHandler:
                         content = ContentProcessor.clean_text(raw_text)
                         break
                         
-            # 图片邮件处理
             if not content and any(part.get_content_maintype() == 'image' for part in msg.walk()):
                 content = "📨 图片内容（文本信息如下）\n" + "\n".join(
                     f"{k}: {v}" for k,v in msg.items() if k.lower() in ['subject', 'from', 'date']
                 )
                 
-            # 最终空行处理
             return ContentProcessor.normalize_newlines(content or "⚠️ 无法解析内容")
             
         except Exception as e:
@@ -186,54 +169,78 @@ class EmailHandler:
 class MessageFormatter:
     @staticmethod
     def format_message(sender, subject, content):
-        """消息格式化强化"""
-        # 解析发件人信息
+        """返回分离的header和body"""
         realname, email_address = parseaddr(sender)
         
-        # 清理信息
         clean_realname = re.sub(r'[|]', '', realname).strip()
         clean_email = email_address.strip()
         clean_subject = re.sub(r'\s+', ' ', subject).replace('|', '')
         
-        # 构建发件人显示信息
         sender_lines = []
         if clean_realname:
             sender_lines.append(f"✉️ {clean_realname}")
         if clean_email:
             sender_lines.append(f"{clean_email}")
         
-        # 组合消息内容
         formatted_content = ContentProcessor.normalize_newlines(content)
         
-        return (
+        header = (
             f"{' '.join(sender_lines)}\n"
             f"{clean_subject}\n\n"
-            f"{formatted_content}"
         )
+        return header, formatted_content
 
     @staticmethod
-    def split_content(text):
-        """智能分割优化"""
-        # 按空行分割段落
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+    def split_content(text, max_length):
+        """智能分割优化（返回分割后的块列表）"""
         chunks = []
         current_chunk = []
         current_length = 0
 
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+
         for para in paragraphs:
-            para_length = len(para) + 2  # 加上换行符
-            if current_length + para_length > MAX_MESSAGE_LENGTH:
-                chunks.append('\n\n'.join(current_chunk))
-                current_chunk = []
-                current_length = 0
-                
-            current_chunk.append(para)
-            current_length += para_length
+            potential_add = len(para) + (2 if current_chunk else 0)
+
+            if current_length + potential_add > max_length:
+                if current_chunk:
+                    chunks.append('\n\n'.join(current_chunk))
+                    current_chunk = []
+                    current_length = 0
+                    
+                    if len(para) > max_length:
+                        start = 0
+                        while start < len(para):
+                            end = start + max_length
+                            chunks.append(para[start:end])
+                            start = end
+                        continue
+                    else:
+                        current_chunk.append(para)
+                        current_length = len(para)
+                else:
+                    start = 0
+                    while start < len(para):
+                        end = start + max_length
+                        chunks.append(para[start:end])
+                        start = end
+            else:
+                current_chunk.append(para)
+                current_length += potential_add
 
         if current_chunk:
             chunks.append('\n\n'.join(current_chunk))
 
-        return chunks
+        # 最终长度校验
+        final_chunks = []
+        for chunk in chunks:
+            while len(chunk) > max_length:
+                final_chunks.append(chunk[:max_length])
+                chunk = chunk[max_length:]
+            if chunk:
+                final_chunks.append(chunk)
+        
+        return final_chunks
 
 class TelegramBot:
     def __init__(self):
@@ -242,19 +249,8 @@ class TelegramBot:
     async def send_message(self, text):
         """最终发送处理"""
         try:
-            # 发送前最后清理
             final_text = ContentProcessor.normalize_newlines(text)
-            
-            # 新增：删除仅含两个或以上减号的行（包含前后空格）
-            final_text = re.sub(
-                r'^\s*[-]{2,}\s*$', 
-                '', 
-                final_text, 
-                flags=re.MULTILINE
-            )
-            
-            # 重新处理换行符确保格式
-            final_text = ContentProcessor.normalize_newlines(final_text)
+            final_text = re.sub(r'^\s*[-]{2,}\s*$', '', final_text, flags=re.MULTILINE)
             
             await self.bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
@@ -262,6 +258,8 @@ class TelegramBot:
                 parse_mode=None,
                 disable_web_page_preview=True
             )
+        except telegram.error.BadRequest as e:
+            logging.error(f"消息过长错误: {str(e)[:200]}")
         except Exception as e:
             logging.error(f"发送失败: {str(e)[:200]}")
 
@@ -287,9 +285,38 @@ async def main():
                     subject = EmailDecoder.decode_email_header(msg.get("Subject"))
                     content = EmailHandler.get_email_content(msg)
 
-                    formatted = MessageFormatter.format_message(sender, subject, content)
+                    header, body = MessageFormatter.format_message(sender, subject, content)
+                    header_len = len(header)
+                    max_body_len = MAX_MESSAGE_LENGTH - header_len
+
+                    # 处理header过长的情况
+                    if max_body_len <= 0:
+                        header = header[:MAX_MESSAGE_LENGTH-4] + "..."
+                        header_len = len(header)
+                        max_body_len = MAX_MESSAGE_LENGTH - header_len
+
+                    # 第一步：分割带header的首个消息
+                    first_part_chunks = MessageFormatter.split_content(body, max_body_len)
                     
-                    for chunk in MessageFormatter.split_content(formatted):
+                    # 发送首个消息（如果有内容）
+                    if first_part_chunks:
+                        first_chunk = first_part_chunks[0]
+                        await bot.send_message(header + first_chunk)
+                        
+                        # 第二步：处理剩余内容（不带header）
+                        remaining_body = '\n\n'.join(
+                            para 
+                            for chunk in first_part_chunks[1:] 
+                            for para in chunk.split('\n\n')
+                        )
+                    else:
+                        remaining_body = body
+
+                    # 第三步：分割剩余内容（使用完整长度限制）
+                    subsequent_chunks = MessageFormatter.split_content(remaining_body, MAX_MESSAGE_LENGTH)
+                    
+                    # 发送后续消息
+                    for chunk in subsequent_chunks:
                         await bot.send_message(chunk)
                         
                     mail.store(num, "+FLAGS", "\\Seen")

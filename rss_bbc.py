@@ -18,19 +18,18 @@ load_dotenv()
 
 # 异步安全配置
 MAX_CONCURRENT_REQUESTS = 5
-SENT_ENTRIES_FILE = "rss.json"
-RETENTION_DAYS = 15  # 15天历史记录保留
-MAX_HISTORY_ENTRIES = 1000  # 内存最大保留1500条
+RETENTION_DAYS = 30  # 30天历史记录保留
+MAX_HISTORY_ENTRIES = 1500  # 内存最大保留1500条
 REQUEST_TIMEOUT = 30
 TELEGRAM_DELAY = 0.3
 
 # RSS源配置
 RSS_FEEDS = [
      'https://feeds.bbci.co.uk/news/world/rss.xml',  # bbc
-    # 'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
+     'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
     # 'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
-    # 'https://www.cnbc.com/id/100003114/device/rss/rss.html',  # CNBC
-     'https://feeds.a.dj.com/rss/RSSWorldNews.xml',  # 华尔街日报
+     'https://www.cnbc.com/id/100003114/device/rss/rss.html',  # CNBC
+   #  'https://feeds.a.dj.com/rss/RSSWorldNews.xml',  # 华尔街日报
     # 'https://www.aljazeera.com/xml/rss/all.xml',  # 半岛电视台
     # 'https://www.ft.com/?format=rss',  # 金融时报
     # 'http://rss.cnn.com/rss/edition.rss',  # cnn
@@ -42,12 +41,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
 TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
 
+# 获取当前脚本的绝对路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# 构建绝对路径
+SENT_ENTRIES_FILE = os.path.join(script_dir, "rss.json")
+LOG_FILE = os.path.join(script_dir, "rss_bot.log")
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('rss_bot.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler()
     ]
 )
@@ -185,7 +190,7 @@ class AsyncRSSBot:
             self.translate_text(summary)
         )
         
-        message = f"*{translated_title}*\n{translated_summary}\n[{source_name}]({entry_id})"
+        message = f"*{translated_title}*\n\n{translated_summary}\n[{source_name}]({entry_id})"
         
         try:
             await self.safe_send_message(TELEGRAM_CHAT_ID, message)

@@ -7,7 +7,7 @@ chmod +x ~/rss/time.sh
 # 安装
 /bin/bash ~/rss/setup.sh
 
-*/30 * * * * nohup /bin/bash /root/rss/rss.sh > output.log 2>&1
+0 * * * * /usr/bin/python3 /path/to/rss_bot.py >> /var/log/rss_bot.log 2>&1
 crontab -e
 # 无链接
 rss.py
@@ -18,7 +18,7 @@ rss2.py
 python3 -m venv rss_venv
 # 激活虚拟环境
 source rss_venv/bin/activate
-python3 123.py
+python3 rss.py
 pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 # 生成依赖
