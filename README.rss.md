@@ -38,7 +38,7 @@ SECOND_RSS_FEEDS = [
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SECOND_TELEGRAM_BOT_TOKEN = os.getenv("SECOND_TELEGRAM_BOT_TOKEN")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 数据库连接配置
 DB_CONFIG = {
@@ -90,7 +90,7 @@ async def send_message(bot, chat_id, text, format_type='Markdown', chunk_size=40
         logging.error(f"Failed to send message: {e}")
 
 
-async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
+async def process_feed(session, feed, sent_entries, pool, bot, TELEGRAM_CHAT_ID, table_name):
     feed_data = await fetch_feed(session, feed)
     if feed_data is None:
         return []
@@ -139,7 +139,7 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
 
     if messages:
         combined_message = "\n\n".join(messages)
-        message_queue.put((combined_message, bot, allowed_chat_ids))
+        message_queue.put((combined_message, bot, TELEGRAM_CHAT_ID))
     return new_entries
 
 
@@ -182,7 +182,7 @@ async def translate_and_send():
             message_data = message_queue.get()
             if message_data is None:
                 break
-            original_message, bot, allowed_chat_ids = message_data
+            original_message, bot, TELEGRAM_CHAT_ID = message_data
             parts = original_message.split('\n\n')
             translated_message_parts = []
             for part in parts:
@@ -197,7 +197,7 @@ async def translate_and_send():
                     else:
                         translated_message_parts.append(part)
             translated_message = "\n\n".join(translated_message_parts)
-            for chat_id in allowed_chat_ids:
+            for chat_id in TELEGRAM_CHAT_ID:
                 await send_message(bot, chat_id, translated_message, 'Markdown')
             await asyncio.sleep(6)  
         except Exception as e:
@@ -249,11 +249,11 @@ async def main():
         second_bot = Bot(token=SECOND_TELEGRAM_BOT_TOKEN)
 
         tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
+            process_feed(session, feed, sent_entries, pool, bot, TELEGRAM_CHAT_ID, "sent_rss")
             for feed in RSS_FEEDS
         ]
         tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_rss2")
+            process_feed(session, feed, sent_entries_second, pool, second_bot, TELEGRAM_CHAT_ID, "sent_rss2")
             for feed in SECOND_RSS_FEEDS
         ]
 

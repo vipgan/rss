@@ -28,7 +28,7 @@ jobs:
         env:
           YOUTUBE_BOT_TOKEN_TWO: ${{ secrets.YOUTUBE_BOT_TOKEN_TWO }}
           YOUTUBE_BOT_TOKEN_ONE: ${{ secrets.YOUTUBE_BOT_TOKEN_ONE }}
-          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}

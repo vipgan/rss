@@ -26,9 +26,9 @@ TELEGRAM_DELAY = 0.3
 # RSS源配置
 RSS_FEEDS = [
      'https://feeds.bbci.co.uk/news/world/rss.xml',  # bbc
-     'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
+    # 'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
     # 'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
-     'https://www.cnbc.com/id/100003114/device/rss/rss.html',  # CNBC
+    # 'https://www.cnbc.com/id/100003114/device/rss/rss.html',  # CNBC
    #  'https://feeds.a.dj.com/rss/RSSWorldNews.xml',  # 华尔街日报
     # 'https://www.aljazeera.com/xml/rss/all.xml',  # 半岛电视台
     # 'https://www.ft.com/?format=rss',  # 金融时报

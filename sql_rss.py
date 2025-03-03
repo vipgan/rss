@@ -17,7 +17,7 @@ load_dotenv()
 
 # 主题+翻意内容+预览
 RSS_FEEDS = [
-    'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
+  #  'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
   #  'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
   #  'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
   #  'https://www.cnbc.com/id/100003114/device/rss/rss.html', # CNBC
@@ -30,8 +30,8 @@ RSS_FEEDS = [
 ]
 #主题+内容+预览
 THIRD_RSS_FEEDS = [ 
-  #  'https://36kr.com/feed-newsflash',
-   # 'https://rsshub.app/10jqka/realtimenews',
+    'https://36kr.com/feed-newsflash',
+    'https://rsshub.app/10jqka/realtimenews',
 
 ]
  # 主题+预览
@@ -60,7 +60,7 @@ FOURTH_RSS_FEEDS = [
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = os.getenv("RSS_TWO")      #10086
 RSS_TWO = os.getenv("RSS_TWO")    #10086
-RSS_HAOYAN = os.getenv("RSS_HAOYAN")  #好烟   
+RSS_TOKEN = os.getenv("RSS_TOKEN")  #好烟   
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 数据库连接配置
@@ -277,7 +277,7 @@ async def main():
         async with aiohttp.ClientSession() as session:
             bot = Bot(token=TELEGRAM_BOT_TOKEN)
             third_bot = Bot(token=RSS_TWO)
-            fourth_bot = Bot(token=RSS_HAOYAN)
+            fourth_bot = Bot(token=RSS_TOKEN)
 
             tasks = [
                 process_feed(session, feed_url, sent_entries, pool, bot, "sent_rss", translate=True)

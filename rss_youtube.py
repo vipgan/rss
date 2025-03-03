@@ -174,7 +174,7 @@ async def main():
     try:
         bot = Bot(os.getenv("RSS_TOKEN"))
         second_bot = Bot(os.getenv("YOUTUBE_RSS"))
-        chat_ids = [int(cid) for cid in os.getenv("ALLOWED_CHAT_IDS", "").split(",") if cid]
+        chat_ids = [int(cid) for cid in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if cid]
         sent_urls = await load_sent_urls()
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)

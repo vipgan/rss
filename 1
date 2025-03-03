@@ -14,6 +14,7 @@ from tencentcloud.common import credential
 from tencentcloud.common.profile.client_profile import ClientProfile
 from tencentcloud.common.profile.http_profile import HttpProfile
 from tencentcloud.tmt.v20180321 import tmt_client, models
+from urllib.parse import quote  # 新增URL编码处理
 
 # 加载.env 文件
 load_dotenv()
@@ -31,7 +32,7 @@ logging.basicConfig(
 )
 
 RSS_FEEDS = [
-    'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
+   'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
   #  'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
   #  'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
   #  'https://www.cnbc.com/id/100003114/device/rss/rss.html', # CNBC
@@ -46,31 +47,31 @@ RSS_FEEDS = [
 THIRD_RSS_FEEDS = [
     'https://36kr.com/feed-newsflash',
     'https://rss.owo.nz/10jqka/realtimenews',
-  #  'https://rss.penggan.us.kg/rss/7b7190c84ada52e7a89e2901ea71ce41_chinese_simplified',
+    'https://rss.penggan.us.kg/rss/7b7190c84ada52e7a89e2901ea71ce41_chinese_simplified',
     'https://rss.penggan.us.kg/rss/7b0c2fb839915016a94424c9ebd6d7cb_chinese_simplified',
     'https://rss.penggan.us.kg/rss/57fac0d19e56587f9264b3a0485b46e3_chinese_simplified',
   #  'https://rss.penggan.us.kg/rss/4734eed5ffb55689bfe8ebc4f55e63bd_chinese_simplified',
 ]
  # 主题+预览
 FOURTH_RSS_FEEDS = [
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
-   # 'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
+    'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
 ]
 
 # Telegram 配置
@@ -85,30 +86,18 @@ MAX_CONCURRENT_REQUESTS = 10
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
 def sanitize_markdown_v2(text):
-    """
-    转义 Telegram Markdown V2 中的特殊字符，并移除斜体等格式。
-    只保留粗体，并安全地处理 URL。
-    """
-    # Markdown V2 需要转义的字符
-    md_special_chars = r'_*[]()~`>#+-=|{}.!'
-    pattern = f'([{re.escape(md_special_chars)}])'
-    text = re.sub(pattern, r'\\\1', text)
-
-    # 移除 HTML 标签
-    text = re.sub(r'<[^>]*>', '', text)
-
+    """只转义Markdown V2的星号，确保粗体可以正常解析"""
+    text = re.sub(r'<[^>]*>', '', text) #删除HTML标签
+    text = re.sub(r'([*])', r'\\\1', text)  # 只转义星号 *
     return text
 
 def format_link_markdown_v2(text, url):
-    """
-    创建 Markdown V2 格式的安全链接。
-    """
-    # 对 URL 进行转义，确保它不包含 Markdown V2 特殊字符
-    safe_url = sanitize_markdown_v2(url)
-    safe_text = sanitize_markdown_v2(text)  # 确保链接文本也安全
-
-    return f"[{safe_text}]({safe_url})"
-
+    """创建经过URL编码的Markdown V2链接"""
+    # 对URL进行编码，保留必要字符
+    encoded_url = quote(url, safe='/:?=&')
+    # 转义文本中的特殊字符
+    safe_text = sanitize_markdown_v2(text)
+    return f"[{safe_text}]({encoded_url})"
 
 async def send_single_message(bot, chat_id, text, disable_web_page_preview=False):
     try:
@@ -326,7 +315,6 @@ async def process_third_feed(session, feed_url, status, bot):
 
     return merged_message
 
-
 async def process_fourth_feed(session, feed_url, status, bot):
     feed_data = await fetch_feed(session, feed_url)
     if not feed_data or not feed_data.entries:
@@ -366,17 +354,17 @@ async def process_fourth_feed(session, feed_url, status, bot):
         }
 
     merged_message = ""
-    source_name = feed_data.feed.get('title', feed_url)
+    #source_name = feed_data.feed.get('title', feed_url)  #不再需要source name
+
     for entry in reversed(new_entries):
         subject = entry.title or "*无标题*"
         url = entry.link
 
-        # Markdown V2 格式化
-        safe_subject = sanitize_markdown_v2(subject)
-        formatted_link = format_link_markdown_v2(source_name, url)
+        # 对URL进行编码
+        encoded_url = quote(url, safe='/:?=&')
+        safe_subject = sanitize_markdown_v2(subject)  #标题仍然需要转义
 
-
-        merged_message += f"*{safe_subject}*\n{formatted_link}\n\n" # 粗体主题，安全链接
+        merged_message += f"*{safe_subject}*\n{encoded_url}\n\n"  #直接使用编码后的URL
 
     return merged_message
 

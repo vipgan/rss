@@ -67,7 +67,7 @@ SECOND_RSS_FEEDS = [
 # Telegram 配置
 RSS_HAOYAN = os.getenv("RSS_HAOYAN")
 YOUTUBE_RSS = os.getenv("YOUTUBE_RSS")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 文件路径配置
 SENT_RSS_FILE = "rss.json"
@@ -102,7 +102,7 @@ async def send_message(bot, chat_id, text, chunk_size=4096):
                 logging.error(f"Failed to send fallback plain text message: {e}")
 
 
-async def process_feed(session, feed_url, sent_entries, bot, allowed_chat_ids, file_path):
+async def process_feed(session, feed_url, sent_entries, bot, TELEGRAM_CHAT_ID, file_path):
     feed_data, feed_title = await fetch_feed(session, feed_url)
     if feed_data is None or feed_title is None:
         return []
@@ -138,7 +138,7 @@ async def process_feed(session, feed_url, sent_entries, bot, allowed_chat_ids, f
 
     if messages:
         combined_message = "\n\n".join(messages)  # 使用换行符拼接消息
-        for chat_id in allowed_chat_ids:
+        for chat_id in TELEGRAM_CHAT_ID:
             await send_message(bot, chat_id, combined_message)
         await asyncio.sleep(6)
 
@@ -182,11 +182,11 @@ async def main():
         second_bot = Bot(token=YOUTUBE_RSS)
 
         tasks = [
-            process_feed(session, feed, sent_entries, bot, ALLOWED_CHAT_IDS, SENT_RSS_FILE)
+            process_feed(session, feed, sent_entries, bot, TELEGRAM_CHAT_ID, SENT_RSS_FILE)
             for feed in RSS_FEEDS
         ]
         tasks += [
-            process_feed(session, feed, sent_entries_second, second_bot, ALLOWED_CHAT_IDS, SENT_YOUTUBE_FILE)
+            process_feed(session, feed, sent_entries_second, second_bot, TELEGRAM_CHAT_ID, SENT_YOUTUBE_FILE)
             for feed in SECOND_RSS_FEEDS
         ]
 

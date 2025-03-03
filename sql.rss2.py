@@ -47,7 +47,8 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCNiJNzSkfumLB7bYtXcIEmg', # 真的很博通
  #   'https://www.youtube.com/feeds/videos.xml?channel_id=UCG_gH6S-2ZUOtEw27uIS_QA', # 7Car小七車觀點
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCJ5rBA0z4WFGtUTS83sAb_A', # POP Radio聯播網
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog', # Asmongold TV 
+  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog', # Asmongold TV 
+    'https://rss.penggan.us.kg/rss/4734eed5ffb55689bfe8ebc4f55e63bd_chinese_simplified', # Asmongold TV 
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCN0eCImZY6_OiJbo8cy5bLw', # 屈機TV 
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCb3TZ4SD_Ys3j4z0-8o6auA', # BBC News 中文
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCiwt1aanVMoPYUt_CQYCPQg', # 全球大視野
@@ -71,9 +72,9 @@ SECOND_RSS_FEEDS = [
 ]
 
 # Telegram 配置
-RSS_HAOYAN = os.getenv("RSS_HAOYAN")
+RSS_TOKEN = os.getenv("RSS_TOKEN")
 YOUTUBE_RSS = os.getenv("YOUTUBE_RSS")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 数据库连接配置
 DB_CONFIG = {
@@ -112,7 +113,7 @@ async def send_message(bot, chat_id, text, chunk_size=4096):
             except Exception as e:
                 logging.error(f"Failed to send fallback plain text message: {e}")
 
-async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_ids, table_name):
+async def process_feed(session, feed_url, sent_entries, pool, bot, TELEGRAM_CHAT_ID, table_name):
     feed_data, feed_title = await fetch_feed(session, feed_url)
     if feed_data is None or feed_title is None:
         return []
@@ -149,7 +150,7 @@ async def process_feed(session, feed_url, sent_entries, pool, bot, allowed_chat_
 
     if messages:
         combined_message = "\n\n".join(messages)  # 使用换行符拼接消息
-        for chat_id in allowed_chat_ids:
+        for chat_id in TELEGRAM_CHAT_ID:
             await send_message(bot, chat_id, combined_message)
         await asyncio.sleep(6)
 
@@ -195,15 +196,15 @@ async def main():
     sent_entries_second = await load_sent_entries_from_db(pool, "sent_youtube")
 
     async with aiohttp.ClientSession() as session:
-        bot = Bot(token=RSS_HAOYAN)
+        bot = Bot(token=RSS_TOKEN)
         second_bot = Bot(token=YOUTUBE_RSS)
 
         tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
+            process_feed(session, feed, sent_entries, pool, bot, TELEGRAM_CHAT_ID, "sent_rss")
             for feed in RSS_FEEDS
         ]
         tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_youtube")
+            process_feed(session, feed, sent_entries_second, pool, second_bot, TELEGRAM_CHAT_ID, "sent_youtube")
             for feed in SECOND_RSS_FEEDS
         ]
 

@@ -1,50 +1,58 @@
 import asyncio
 import aiohttp
 import logging
-import os
 import re
+import os
 import json
-import html
-from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 from feedparser import parse
 from telegram import Bot
-from telegram.constants import ParseMode
+from telegram.error import BadRequest
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.tmt.v20180321 import tmt_client, models
 
-# 加载环境变量
+# 加载.env 文件
 load_dotenv()
 
-# 配置参数
-CONNECTION_POOL_SIZE = 20
-REQUEST_TIMEOUT = 30
-SEND_INTERVAL = 0.7
-MAX_CONCURRENT_TASKS = 10
-MAX_ENTRIES_PER_FEED = 20
-HOURS_LIMIT = 24
-STORAGE_FILE = "youtube.json"
+# 配置绝对路径
+BASE_DIR = Path(__file__).resolve().parent
+STATUS_FILE = BASE_DIR / "rss2.json"
+
+# 配置日志
+logging.basicConfig(
+    filename=BASE_DIR / "rss2.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    encoding="utf-8"
+)
 
 RSS_FEEDS = [
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvijahEyGtvMpmMHBu4FS2w', # 零度解说
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC96OvMh0Mb_3NmuE8Dpu7Gg', # 搞机零距离
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQoagx4VHBw3HkAyzvKEEBA', # 科技共享
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCbCCUH8S3yhlm7__rhxR2QQ', # 不良林
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCMtXiCoKFrc2ovAGc1eywDg', # 一休 
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCii04BCvYIdQvshrdNDAcww', # 悟空的日常 
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCJMEiNh1HvpopPU3n9vJsMQ', # 理科男士 
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCYjB6uufPeHSwuHs8wovLjg', # 中指通 
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCSs4A6HYKmHA2MG_0z-F0xw', # 李永乐老师 
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCZDgXi7VpKhBJxsPuZcBpgA', # 可恩KeEn  
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCxukdnZiXnTFvjF5B5dvJ5w', # 甬哥侃侃侃ygkkk  
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCUfT9BAofYBKUTiEVrgYGZw', # 科技分享  
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC51FT5EeNPiiQzatlA2RlRA', # 乌客wuke  
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCDD8WJ7Il3zWBgEYBUtc9xQ', # jack stone  
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCWurUlxgm7YJPPggDz9YJjw', # 一瓶奶油
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCvENMyIFurJi_SrnbnbyiZw', # 酷友社
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCmhbF9emhHa-oZPiBfcLFaQ', # WenWeekly
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UC3BNSKOaphlEoK4L7QTlpbA', # 中外观察
-]
+  #  'https://feeds.bbci.co.uk/news/world/rss.xml', # bbc
+  #  'https://www3.nhk.or.jp/rss/news/cat6.xml',  # nhk
+  #  'http://www3.nhk.or.jp/rss/news/cat5.xml',  # nhk金融
+  #  'https://www.cnbc.com/id/100003114/device/rss/rss.html', # CNBC
+  #  'https://feeds.a.dj.com/rss/RSSWorldNews.xml', # 华尔街日报
+  #  'https://www.aljazeera.com/xml/rss/all.xml',# 半岛电视台
+  #  'https://www3.nhk.or.jp/rss/news/cat5.xml',# NHK 商业
+  #  'https://www.ft.com/?format=rss', # 金融时报
+  #  'http://rss.cnn.com/rss/edition.rss', # cnn
 
-SECOND_RSS_FEEDS = [
+]
+#主题+内容+预览
+THIRD_RSS_FEEDS = [
+  #  'https://36kr.com/feed-newsflash',
+   # 'https://rss.owo.nz/10jqka/realtimenews',
+  #  'https://rss.penggan.us.kg/rss/7b7190c84ada52e7a89e2901ea71ce41_chinese_simplified',
+   # 'https://rss.penggan.us.kg/rss/7b0c2fb839915016a94424c9ebd6d7cb_chinese_simplified',
+   # 'https://rss.penggan.us.kg/rss/57fac0d19e56587f9264b3a0485b46e3_chinese_simplified',
+  #  'https://rss.penggan.us.kg/rss/4734eed5ffb55689bfe8ebc4f55e63bd_chinese_simplified',
+]
+ # 主题+预览
+FOURTH_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCUNciDq-y6I6lEQPeoP-R5A', # 苏恒观察
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCXkOTZJ743JgVhJWmNV8F3Q', # 寒國人
     'https://www.youtube.com/feeds/videos.xml?channel_id=UC2r2LPbOUssIa02EbOIm7NA', # 星球熱點
@@ -54,7 +62,8 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCNiJNzSkfumLB7bYtXcIEmg', # 真的很博通
  #   'https://www.youtube.com/feeds/videos.xml?channel_id=UCG_gH6S-2ZUOtEw27uIS_QA', # 7Car小七車觀點
   #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCJ5rBA0z4WFGtUTS83sAb_A', # POP Radio聯播網
-    'https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog', # Asmongold TV 
+  #  'https://www.youtube.com/feeds/videos.xml?channel_id=UCQeRaTukNYft1_6AZPACnog', # Asmongold TV 
+    'https://rss.penggan.us.kg/rss/4734eed5ffb55689bfe8ebc4f55e63bd_chinese_simplified', # Asmongold TV 
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCN0eCImZY6_OiJbo8cy5bLw', # 屈機TV 
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCb3TZ4SD_Ys3j4z0-8o6auA', # BBC News 中文
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCiwt1aanVMoPYUt_CQYCPQg', # 全球大視野
@@ -74,143 +83,340 @@ SECOND_RSS_FEEDS = [
     'https://www.youtube.com/feeds/videos.xml?channel_id=UCHW6W9g2TJL2_Lf7GfoI5kg', # 电影放映厅
 ]
 
-def clean_text(text):
-    """清理文本并转义HTML字符"""
-    text = re.sub(r'<\/?b>', '', text)  # 移除残留HTML标签
-    text = re.sub(r'[^\w\s\u4e00-\u9fa5.,!?;:"\'()\-]+', '', text)
-    return html.escape(text)  # 转义HTML特殊字符
+# Telegram 配置
+TELEGRAM_BOT_TOKEN = os.getenv("RSS_TWO")
+RSS_TWO = os.getenv("RSS_TWO")
+YOUTUBE_RSS = os.getenv("YOUTUBE_RSS")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
+TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
+TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
 
-async def create_session():
-    return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(
-            limit=CONNECTION_POOL_SIZE,
-            limit_per_host=5,
-            ssl=False
-        ),
-        timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    )
+MAX_CONCURRENT_REQUESTS = 10
+semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+def sanitize_markdown_v2(text):
+    """
+    转义 Telegram Markdown V2 中的特殊字符，并移除斜体等格式。
+    只保留粗体，并安全地处理 URL。
+    """
+    # Markdown V2 需要转义的字符
+    md_special_chars = r'_*[]()~`>#+-=|{}.!'
+    pattern = f'([{re.escape(md_special_chars)}])'
+    text = re.sub(pattern, r'\\\1', text)
+
+    # 移除 HTML 标签
+    text = re.sub(r'<[^>]*>', '', text)
+
+    return text
+
+def format_link_markdown_v2(text, url):
+    """
+    创建 Markdown V2 格式的安全链接。
+    """
+    # 对 URL 进行转义，确保它不包含 Markdown V2 特殊字符
+    safe_url = sanitize_markdown_v2(url)
+    safe_text = sanitize_markdown_v2(text)  # 确保链接文本也安全
+
+    return f"[{safe_text}]({safe_url})"
+
+
+async def send_single_message(bot, chat_id, text, disable_web_page_preview=False):
+    try:
+        MAX_MESSAGE_LENGTH = 4096
+        if len(text.encode('utf-8')) > MAX_MESSAGE_LENGTH:
+            for i in range(0, len(text), MAX_MESSAGE_LENGTH):
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=text[i:i+MAX_MESSAGE_LENGTH],
+                    parse_mode='MarkdownV2',  # 明确指定 MarkdownV2
+                    disable_web_page_preview=disable_web_page_preview
+                )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode='MarkdownV2', # 明确指定 MarkdownV2
+                disable_web_page_preview=disable_web_page_preview
+            )
+    except BadRequest as e:
+        logging.error(f"Failed to send message (Markdown error): {e} - Text: {text[:200]}...") # 记录前200个字符
+    except Exception as e:
+        logging.error(f"Failed to send message: {e}")
+
 
 async def fetch_feed(session, feed_url):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36'}
     try:
-        async with session.get(feed_url) as response:
-            response.raise_for_status()
-            return parse(await response.read())
+        async with semaphore:
+            async with session.get(feed_url, headers=headers, timeout=40) as response:
+                response.raise_for_status()
+                return parse(await response.read())
     except Exception as e:
-        logging.error(f"抓取失败 {feed_url}: {e}")
+        logging.error(f"Error fetching {feed_url}: {e}")
         return None
 
-async def send_message(bot, chat_id, text):
+async def auto_translate_text(text):
     try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=False
-        )
-        await asyncio.sleep(SEND_INTERVAL)
+        cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
+        clientProfile = ClientProfile(httpProfile=HttpProfile(endpoint="tmt.tencentcloudapi.com"))
+        client = tmt_client.TmtClient(cred, "na-siliconvalley", clientProfile)
+
+        req = models.TextTranslateRequest()
+        req.SourceText = text
+        req.Source = "auto"
+        req.Target = "zh"
+        req.ProjectId = 0
+
+        return client.TextTranslate(req).TargetText
     except Exception as e:
-        logging.error(f"消息发送失败: {e}")
-        for retry in range(3):
-            try:
-                await asyncio.sleep(2 ** retry)
-                await bot.send_message(chat_id=chat_id, text=text)
-                return
-            except Exception:
-                continue
+        logging.error(f"Translation error: {e}")
+        return text
 
-def within_time_limit(entry):
-    time_fields = ['published_parsed', 'updated_parsed', 'created_parsed']
-    for field in time_fields:
-        if hasattr(entry, field):
-            time_tuple = getattr(entry, field)
-            if time_tuple:
-                entry_time = datetime(*time_tuple[:6], tzinfo=timezone.utc)
-                time_diff = datetime.now(timezone.utc) - entry_time
-                return time_diff <= timedelta(hours=HOURS_LIMIT)
-    return False
-
-async def process_feed(session, feed_url, bot, chat_ids, sent_urls):
+def load_status():
     try:
-        feed_data = await fetch_feed(session, feed_url)
-        if not feed_data or not hasattr(feed_data, 'feed'):
-            return
+        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
-        raw_feed_title = feed_data.feed.get('title', '未命名来源')
-        feed_title = clean_text(raw_feed_title)  # 清理频道名称
-        new_entries = []
-        processed_count = 0
-
-        for entry in feed_data.entries:
-            if processed_count >= MAX_ENTRIES_PER_FEED:
-                break
-
-            if not within_time_limit(entry):
-                continue
-
-            url = entry.get('link', '')
-            if url and url not in sent_urls:
-                raw_title = entry.get('title', '无标题')
-                clean_title = clean_text(raw_title)  # 清理并转义标题
-                
-                # 使用HTML加粗标签
-                new_entries.append(f"<b>{clean_title}</b>\n{url}")
-                sent_urls.add(url)
-                processed_count += 1
-
-        if new_entries:
-            message = f"{feed_title}\n\n" + "\n\n".join(new_entries)
-            for chat_id in chat_ids:
-                await send_message(bot, chat_id, message)
-            await save_sent_urls(sent_urls)
-
+def save_status(status):
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(status, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        logging.error(f"处理源失败 {feed_url}: {e}")
+        logging.error(f"Error saving status: {e}")
+
+def get_entry_identifier(entry):
+    """获取条目的唯一标识符"""
+    if hasattr(entry, 'guid') and entry.guid:
+        return entry.guid
+    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+        return datetime(*entry.published_parsed[:6]).isoformat()
+    if hasattr(entry, 'pubDate_parsed') and entry.pubDate_parsed:
+        return datetime(*entry.pubDate_parsed[:6]).isoformat()
+    return f"{entry.get('title', '')}-{entry.get('link', '')}"
+
+def get_entry_timestamp(entry):
+    """获取条目的标准化时间戳"""
+    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+        return datetime(*entry.published_parsed[:6])
+    if hasattr(entry, 'pubDate_parsed') and entry.pubDate_parsed:
+        return datetime(*entry.pubDate_parsed[:6])
+    return datetime.now()
+
+async def process_feed(session, feed_url, status, bot, translate=True):
+    feed_data = await fetch_feed(session, feed_url)
+    if not feed_data or not feed_data.entries:
+        return ""
+
+    # 获取上次处理状态
+    last_status = status.get(feed_url, {})
+    last_identifier = last_status.get('identifier')
+    last_timestamp = datetime.fromisoformat(last_status.get('timestamp')) if last_status.get('timestamp') else None
+
+    # 按时间倒序排序
+    sorted_entries = sorted(feed_data.entries, 
+                          key=lambda x: get_entry_timestamp(x), 
+                          reverse=True)
+
+    new_entries = []
+    current_latest = None
+
+    for entry in sorted_entries:
+        entry_time = get_entry_timestamp(entry)
+        identifier = get_entry_identifier(entry)
+
+        # 遇到已处理的条目则停止
+        if last_identifier and identifier == last_identifier:
+            break
+        if last_timestamp and entry_time <= last_timestamp:
+            break
+
+        new_entries.append(entry)
+        # 记录当前最新的条目
+        if not current_latest or entry_time > get_entry_timestamp(current_latest):
+            current_latest = entry
+
+    # 如果没有新条目
+    if not new_entries:
+        return ""
+
+    # 更新处理状态
+    if current_latest:
+        status[feed_url] = {
+            "identifier": get_entry_identifier(current_latest),
+            "timestamp": get_entry_timestamp(current_latest).isoformat()
+        }
+
+    # 按实际发布时间顺序处理（旧→新）
+    merged_message = ""
+    source_name = feed_data.feed.get('title', feed_url)
+    for entry in reversed(new_entries):
+        subject = entry.title or "*无标题*"
+        url = entry.link
+        summary = getattr(entry, 'summary', "暂无简介")  # 注意这里没有sanitize_markdown
+
+        if translate:
+            translated_subject = await auto_translate_text(subject)
+            translated_summary = await auto_translate_text(summary)
+        else:
+            translated_subject = subject
+            translated_summary = summary
+
+        safe_subject = sanitize_markdown_v2(translated_subject)  # 转义主题
+        safe_summary = sanitize_markdown_v2(translated_summary)  # 转义摘要
+
+        # 构建 Markdown V2 消息
+        formatted_link = format_link_markdown_v2(source_name, url)
+        message = f"*{safe_subject}*\n{safe_summary}\n{formatted_link}"  # 粗体主题，安全链接
+
+        merged_message += message + "\n\n"
+
+    return merged_message
+
+
+async def process_third_feed(session, feed_url, status, bot):
+    feed_data = await fetch_feed(session, feed_url)
+    if not feed_data or not feed_data.entries:
+        return ""
+
+    last_status = status.get(feed_url, {})
+    last_identifier = last_status.get('identifier')
+    last_timestamp = datetime.fromisoformat(last_status.get('timestamp')) if last_status.get('timestamp') else None
+
+    sorted_entries = sorted(feed_data.entries,
+                          key=lambda x: get_entry_timestamp(x),
+                          reverse=True)
+
+    new_entries = []
+    current_latest = None
+
+    for entry in sorted_entries:
+        entry_time = get_entry_timestamp(entry)
+        identifier = get_entry_identifier(entry)
+
+        if last_identifier and identifier == last_identifier:
+            break
+        if last_timestamp and entry_time <= last_timestamp:
+            break
+
+        new_entries.append(entry)
+        if not current_latest or entry_time > get_entry_timestamp(current_latest):
+            current_latest = entry
+
+    if not new_entries:
+        return ""
+
+    if current_latest:
+        status[feed_url] = {
+            "identifier": get_entry_identifier(current_latest),
+            "timestamp": get_entry_timestamp(current_latest).isoformat()
+        }
+
+    merged_message = ""
+    source_name = feed_data.feed.get('title', feed_url)
+    for entry in reversed(new_entries):
+        subject = entry.title or "*无标题*"
+        url = entry.link
+        summary = getattr(entry, 'summary', "暂无简介")
+
+        # Markdown V2 格式化
+        safe_subject = sanitize_markdown_v2(subject)
+        safe_summary = sanitize_markdown_v2(summary)
+        formatted_link = format_link_markdown_v2(source_name, url)
+
+        message_content = f"*{safe_subject}*\n{safe_summary}\n{formatted_link}" # 粗体主题, 安全链接
+        message_bytes = message_content.encode('utf-8')
+
+        if len(message_bytes) <= 333:
+            merged_message += message_content + "\n\n"
+        else:
+            title_and_link = f"*{safe_subject}*\n{formatted_link}"# 粗体主题, 安全链接
+            merged_message += title_and_link + "\n\n"
+
+    return merged_message
+
+
+async def process_fourth_feed(session, feed_url, status, bot):
+    feed_data = await fetch_feed(session, feed_url)
+    if not feed_data or not feed_data.entries:
+        return ""
+
+    last_status = status.get(feed_url, {})
+    last_identifier = last_status.get('identifier')
+    last_timestamp = datetime.fromisoformat(last_status.get('timestamp')) if last_status.get('timestamp') else None
+
+    sorted_entries = sorted(feed_data.entries,
+                          key=lambda x: get_entry_timestamp(x),
+                          reverse=True)
+
+    new_entries = []
+    current_latest = None
+
+    for entry in sorted_entries:
+        entry_time = get_entry_timestamp(entry)
+        identifier = get_entry_identifier(entry)
+
+        if last_identifier and identifier == last_identifier:
+            break
+        if last_timestamp and entry_time <= last_timestamp:
+            break
+
+        new_entries.append(entry)
+        if not current_latest or entry_time > get_entry_timestamp(current_latest):
+            current_latest = entry
+
+    if not new_entries:
+        return ""
+
+    if current_latest:
+        status[feed_url] = {
+            "identifier": get_entry_identifier(current_latest),
+            "timestamp": get_entry_timestamp(current_latest).isoformat()
+        }
+
+    merged_message = ""
+    source_name = feed_data.feed.get('title', feed_url)
+    for entry in reversed(new_entries):
+        subject = entry.title or "*无标题*"
+        url = entry.link
+
+        # Markdown V2 格式化
+        safe_subject = sanitize_markdown_v2(subject)
+        formatted_link = format_link_markdown_v2(source_name, url)
+
+
+        merged_message += f"*{safe_subject}*\n{formatted_link}\n\n" # 粗体主题，安全链接
+
+    return merged_message
 
 async def main():
-    session = await create_session()
-    try:
-        bot = Bot(os.getenv("RSS_TOKEN"))
-        second_bot = Bot(os.getenv("YOUTUBE_RSS"))
-        chat_ids = [int(cid) for cid in os.getenv("ALLOWED_CHAT_IDS", "").split(",") if cid]
-        sent_urls = await load_sent_urls()
+    async with aiohttp.ClientSession() as session:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        third_bot = Bot(token=RSS_TWO)
+        fourth_bot = Bot(token=YOUTUBE_RSS)
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-        
-        async def limited_task(feed_url, target_bot):
-            async with semaphore:
-                await process_feed(session, feed_url, target_bot, chat_ids, sent_urls)
+        # 加载处理状态
+        status = load_status()
 
-        tasks = []
-        for feed_url in RSS_FEEDS:
-            tasks.append(limited_task(feed_url, bot))
-        for feed_url in SECOND_RSS_FEEDS:
-            tasks.append(limited_task(feed_url, second_bot))
+        # 处理三类源
+        for url in RSS_FEEDS:
+            message = await process_feed(session, url, status, bot)
+            if message:
+                await send_single_message(bot, TELEGRAM_CHAT_ID[0], message, True)
 
-        await asyncio.gather(*tasks)
-        await save_sent_urls(sent_urls)
-        
-    finally:
-        await session.close()
+        for url in THIRD_RSS_FEEDS:
+            message = await process_third_feed(session, url, status, third_bot)
+            if message:
+                await send_single_message(third_bot, TELEGRAM_CHAT_ID[0], message, True)
 
-async def load_sent_urls():
-    try:
-        if os.path.exists(STORAGE_FILE):
-            with open(STORAGE_FILE, 'r') as f:
-                return set(json.load(f))
-    except Exception as e:
-        logging.error(f"加载失败 {STORAGE_FILE}: {e}")
-    return set()
+        for url in FOURTH_RSS_FEEDS:
+            message = await process_fourth_feed(session, url, status, fourth_bot)
+            if message:
+                await send_single_message(fourth_bot, TELEGRAM_CHAT_ID[0], message)
 
-async def save_sent_urls(urls):
-    try:
-        with open(STORAGE_FILE, 'w') as f:
-            json.dump(list(urls), f)
-    except Exception as e:
-        logging.error(f"保存失败 {STORAGE_FILE}: {e}")
+        # 保存最新状态
+        save_status(status)
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
     asyncio.run(main())

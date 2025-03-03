@@ -64,7 +64,7 @@ SECOND_RSS_FEEDS = [
 # Telegram 配置
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SECOND_TELEGRAM_BOT_TOKEN = os.getenv("SECOND_TELEGRAM_BOT_TOKEN")
-ALLOWED_CHAT_IDS = os.getenv("ALLOWED_CHAT_IDS", "").split(",")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").split(",")
 
 # 数据库连接配置
 DB_CONFIG = {
@@ -95,7 +95,7 @@ async def send_message(bot, chat_id, text, chunk_size=4000):
         except Exception as e:
             logging.error(f"Failed to send message: {e}")
 
-async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids, table_name):
+async def process_feed(session, feed, sent_entries, pool, bot, TELEGRAM_CHAT_ID, table_name):
     feed_data = await fetch_feed(session, feed)
     if feed_data is None:
         return []
@@ -131,7 +131,7 @@ async def process_feed(session, feed, sent_entries, pool, bot, allowed_chat_ids,
     # 合并为一个消息进行推送
     if messages:
         combined_message = "\n\n".join(messages)
-        for chat_id in allowed_chat_ids:
+        for chat_id in TELEGRAM_CHAT_ID:
             await send_message(bot, chat_id, combined_message)
         await asyncio.sleep(6)  # 避免触发 Telegram API 速率限制
 
@@ -181,11 +181,11 @@ async def main():
         second_bot = Bot(token=SECOND_TELEGRAM_BOT_TOKEN)
 
         tasks = [
-            process_feed(session, feed, sent_entries, pool, bot, ALLOWED_CHAT_IDS, "sent_rss")
+            process_feed(session, feed, sent_entries, pool, bot, TELEGRAM_CHAT_ID, "sent_rss")
             for feed in RSS_FEEDS
         ]
         tasks += [
-            process_feed(session, feed, sent_entries_second, pool, second_bot, ALLOWED_CHAT_IDS, "sent_youtube")
+            process_feed(session, feed, sent_entries_second, pool, second_bot, TELEGRAM_CHAT_ID, "sent_youtube")
             for feed in SECOND_RSS_FEEDS
         ]
 
