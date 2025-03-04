@@ -18,7 +18,7 @@ rss2.py
 python3 -m venv rss_venv
 # 激活虚拟环境
 source rss_venv/bin/activate
-python3 rss.py
+python3 rss2.py
 pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 # 生成依赖

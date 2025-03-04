@@ -10,6 +10,10 @@ import re
 import chardet
 from dotenv import load_dotenv
 from email.utils import parseaddr
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.tmt.v20180321 import tmt_client, models
 
 load_dotenv()
 
@@ -19,13 +23,24 @@ EMAIL_ADDRESS = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_API_KEY")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-MAX_MESSAGE_LENGTH = 3900  # 保留安全余量
+TENCENTCLOUD_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID")
+TENCENTCLOUD_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY")
+MAX_MESSAGE_LENGTH = 3900
 DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+
+# 日志配置
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('mail.log'),
+        logging.StreamHandler()
+    ]
+)
 
 class EmailDecoder:
     @staticmethod
     def decode_email_header(header):
-        """智能解码邮件头"""
         if not header:
             return ""
         try:
@@ -42,7 +57,6 @@ class EmailDecoder:
 
     @staticmethod
     def detect_encoding(content):
-        """编码检测优化"""
         try:
             result = chardet.detect(content)
             if result['confidence'] > 0.7:
@@ -55,13 +69,11 @@ class EmailDecoder:
 class ContentProcessor:
     @staticmethod
     def normalize_newlines(text):
-        """统一换行符并合并空行"""
         text = text.replace('\r\n', '\n').replace('\r', '\n')
         return re.sub(r'\n{3,}', '\n\n', text)
 
     @staticmethod
     def clean_text(text):
-        """终极文本清洗"""
         text = text.replace('|', '')
         text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
         text = ContentProcessor.normalize_newlines(text)
@@ -71,7 +83,6 @@ class ContentProcessor:
 
     @staticmethod
     def extract_urls(html):
-        """智能链接过滤"""
         url_pattern = re.compile(
             r'(https?://[^\s>"\'{}|\\^`]+)',
             re.IGNORECASE
@@ -98,7 +109,6 @@ class ContentProcessor:
 
     @staticmethod
     def convert_html_to_text(html_bytes):
-        """HTML转换强化"""
         try:
             encoding = EmailDecoder.detect_encoding(html_bytes)
             html = html_bytes.decode(encoding, errors='replace')
@@ -127,7 +137,6 @@ class ContentProcessor:
 class EmailHandler:
     @staticmethod
     def get_email_content(msg):
-        """统一内容获取"""
         try:
             content = ""
             for part in msg.walk():
@@ -159,7 +168,6 @@ class EmailHandler:
 class MessageFormatter:
     @staticmethod
     def format_message(sender, subject, content):
-        """返回分离的header和body"""
         realname, email_address = parseaddr(sender)
         
         clean_realname = re.sub(r'[|]', '', realname).strip()
@@ -182,7 +190,6 @@ class MessageFormatter:
 
     @staticmethod
     def split_content(text, max_length):
-        """智能分割优化（返回分割后的块列表）"""
         chunks = []
         current_chunk = []
         current_length = 0
@@ -221,7 +228,6 @@ class MessageFormatter:
         if current_chunk:
             chunks.append('\n\n'.join(current_chunk))
 
-        # 最终长度校验
         final_chunks = []
         for chunk in chunks:
             while len(chunk) > max_length:
@@ -232,12 +238,40 @@ class MessageFormatter:
         
         return final_chunks
 
+    @staticmethod
+    def is_chinese(text):
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        total_chars = len(text)
+        if total_chars == 0:
+            return False
+        return (len(chinese_chars) / total_chars) > 0.3
+
+class TranslationHandler:
+    @staticmethod
+    async def auto_translate_text(text):
+        try:
+            cred = credential.Credential(TENCENTCLOUD_SECRET_ID, TENCENTCLOUD_SECRET_KEY)
+            clientProfile = ClientProfile(httpProfile=HttpProfile(endpoint="tmt.tencentcloudapi.com"))
+            client = tmt_client.TmtClient(cred, "na-siliconvalley", clientProfile)
+
+            req = models.TextTranslateRequest()
+            req.SourceText = text[:5000]  # 限制翻译文本长度
+            req.Source = "auto"
+            req.Target = "zh"
+            req.ProjectId = 0
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, client.TextTranslate, req)
+            return response.TargetText
+        except Exception as e:
+            logging.error(f"翻译错误: {e}")
+            return text
+
 class TelegramBot:
     def __init__(self):
         self.bot = telegram.Bot(TELEGRAM_TOKEN)
         
     async def send_message(self, text):
-        """最终发送处理"""
         try:
             final_text = ContentProcessor.normalize_newlines(text)
             final_text = re.sub(r'^\s*[-]{2,}\s*$', '', final_text, flags=re.MULTILINE)
@@ -275,25 +309,28 @@ async def main():
                     subject = EmailDecoder.decode_email_header(msg.get("Subject"))
                     content = EmailHandler.get_email_content(msg)
 
+                    # 自动翻译逻辑
+                    if not MessageFormatter.is_chinese(content):
+                        try:
+                            content = await TranslationHandler.auto_translate_text(content)
+                        except Exception as e:
+                            logging.error(f"翻译失败: {e}，发送原文")
+
                     header, body = MessageFormatter.format_message(sender, subject, content)
                     header_len = len(header)
                     max_body_len = MAX_MESSAGE_LENGTH - header_len
 
-                    # 处理header过长的情况
                     if max_body_len <= 0:
                         header = header[:MAX_MESSAGE_LENGTH-4] + "..."
                         header_len = len(header)
                         max_body_len = MAX_MESSAGE_LENGTH - header_len
 
-                    # 第一步：分割带header的首个消息
                     first_part_chunks = MessageFormatter.split_content(body, max_body_len)
                     
-                    # 发送首个消息（如果有内容）
                     if first_part_chunks:
                         first_chunk = first_part_chunks[0]
                         await bot.send_message(header + first_chunk)
                         
-                        # 第二步：处理剩余内容（不带header）
                         remaining_body = '\n\n'.join(
                             para 
                             for chunk in first_part_chunks[1:] 
@@ -302,10 +339,8 @@ async def main():
                     else:
                         remaining_body = body
 
-                    # 第三步：分割剩余内容（使用完整长度限制）
                     subsequent_chunks = MessageFormatter.split_content(remaining_body, MAX_MESSAGE_LENGTH)
                     
-                    # 发送后续消息
                     for chunk in subsequent_chunks:
                         await bot.send_message(chunk)
                         
