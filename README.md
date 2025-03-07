@@ -7,7 +7,10 @@ chmod +x ~/rss/time.sh
 # 安装
 /bin/bash ~/rss/setup.sh
 
-0 * * * * /usr/bin/python3 /path/to/rss_bot.py >> /var/log/rss_bot.log 2>&1
+
+30 */1 * * * /bin/bash ~/rss/rss.sh
+使用  python-telegram-bot  库的  escape_markdown  函数自动转义：保留去除html标签，用库自动转义替换其他处理方式和链接。删除def format_link_markdown_v2(text, url):
+
 crontab -e
 # 无链接
 rss.py

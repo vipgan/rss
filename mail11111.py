@@ -3,6 +3,8 @@ import email
 from email.header import decode_header
 import html2text
 import telegram
+from telegram.helpers import escape_markdown
+from telegram.constants import ParseMode
 import os
 import asyncio
 import re
@@ -36,7 +38,6 @@ class EmailDecoder:
                 for t in decoded
             ])
         except Exception as e:
-            # logging.error(f"Header decode error: {e}")
             return str(header)
 
     @staticmethod
@@ -48,7 +49,6 @@ class EmailDecoder:
                 return result['encoding']
             return 'gb18030' if b'\x80' in content[:100] else 'utf-8'
         except Exception as e:
-            # logging.error(f"Encoding detection error: {e}")
             return 'gb18030'
 
 class ContentProcessor:
@@ -110,17 +110,22 @@ class ContentProcessor:
             
             text = converter.handle(html)
             text = ContentProcessor.clean_text(text)
+            text = escape_markdown(text, version=2)  # 转义普通文本
             
             urls = ContentProcessor.extract_urls(html)
+            formatted_urls = []
+            for url in urls:
+                escaped_text = escape_markdown(url, version=2)
+                escaped_url = url.replace(')', '\\)').replace('\\', '\\\\')
+                formatted_urls.append(f"[{escaped_text}]({escaped_url})")
             
             final_text = text
-            if urls:
-                final_text += "\n\n相关链接：\n" + "\n".join(urls)
+            if formatted_urls:
+                final_text += "\n\n相关链接：\n" + "\n".join(formatted_urls)
                 
             return ContentProcessor.normalize_newlines(final_text)
             
         except Exception as e:
-            # logging.error(f"HTML处理失败: {e}")
             return "⚠️ 内容解析异常"
 
 class EmailHandler:
@@ -142,17 +147,18 @@ class EmailHandler:
                         encoding = EmailDecoder.detect_encoding(text_bytes)
                         raw_text = text_bytes.decode(encoding, errors='replace')
                         content = ContentProcessor.clean_text(raw_text)
+                        content = escape_markdown(content, version=2)  # 转义纯文本
                         break
                         
             if not content and any(part.get_content_maintype() == 'image' for part in msg.walk()):
                 content = "📨 图片内容（文本信息如下）\n" + "\n".join(
                     f"{k}: {v}" for k,v in msg.items() if k.lower() in ['subject', 'from', 'date']
                 )
+                content = escape_markdown(content, version=2)
                 
             return ContentProcessor.normalize_newlines(content or "⚠️ 无法解析内容")
             
         except Exception as e:
-            # logging.error(f"内容提取失败: {e}")
             return "⚠️ 内容提取异常"
 
 class MessageFormatter:
@@ -165,6 +171,11 @@ class MessageFormatter:
         clean_email = email_address.strip()
         clean_subject = re.sub(r'\s+', ' ', subject).replace('|', '')
         
+        # 转义Markdown特殊字符
+        clean_realname = escape_markdown(clean_realname, version=2)
+        clean_email = escape_markdown(clean_email, version=2)
+        clean_subject = escape_markdown(clean_subject, version=2)
+        
         sender_lines = []
         if clean_realname:
             sender_lines.append(f"✉️ {clean_realname}")
@@ -175,7 +186,7 @@ class MessageFormatter:
         
         header = (
             f"{' '.join(sender_lines)}\n"
-            f"{clean_subject}\n\n"
+            f"*{clean_subject}*\n\n"  # 主题使用加粗
         )
         return header, formatted_content
 
@@ -244,14 +255,12 @@ class TelegramBot:
             await self.bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
                 text=final_text,
-                parse_mode=None,
+                parse_mode=ParseMode.MARKDOWN_V2,
                 disable_web_page_preview=True
             )
         except telegram.error.BadRequest as e:
-            # logging.error(f"消息过长错误: {str(e)[:200]}")
             pass
         except Exception as e:
-            # logging.error(f"发送失败: {str(e)[:200]}")
             pass
 
 async def main():
@@ -264,7 +273,6 @@ async def main():
             
             _, nums = mail.search(None, "UNSEEN")
             if not nums[0]:
-                # logging.info("无未读邮件")
                 return
 
             for num in nums[0].split():
@@ -280,21 +288,17 @@ async def main():
                     header_len = len(header)
                     max_body_len = MAX_MESSAGE_LENGTH - header_len
 
-                    # 处理header过长的情况
                     if max_body_len <= 0:
                         header = header[:MAX_MESSAGE_LENGTH-4] + "..."
                         header_len = len(header)
                         max_body_len = MAX_MESSAGE_LENGTH - header_len
 
-                    # 第一步：分割带header的首个消息
                     first_part_chunks = MessageFormatter.split_content(body, max_body_len)
                     
-                    # 发送首个消息（如果有内容）
                     if first_part_chunks:
                         first_chunk = first_part_chunks[0]
                         await bot.send_message(header + first_chunk)
                         
-                        # 第二步：处理剩余内容（不带header）
                         remaining_body = '\n\n'.join(
                             para 
                             for chunk in first_part_chunks[1:] 
@@ -303,21 +307,17 @@ async def main():
                     else:
                         remaining_body = body
 
-                    # 第三步：分割剩余内容（使用完整长度限制）
                     subsequent_chunks = MessageFormatter.split_content(remaining_body, MAX_MESSAGE_LENGTH)
                     
-                    # 发送后续消息
                     for chunk in subsequent_chunks:
                         await bot.send_message(chunk)
                         
                     mail.store(num, "+FLAGS", "\\Seen")
                     
                 except Exception as e:
-                    # logging.error(f"处理异常: {str(e)[:200]}")
                     continue
 
     except Exception as e:
-        # logging.error(f"连接异常: {str(e)[:200]}")
         pass
 
 if __name__ == "__main__":
